@@ -1,0 +1,16 @@
+# Build outputs — native binaries are written outside the repo by convention,
+# but ignore them in case someone builds in-tree.
+/bendown-bin
+/bendown-batch
+*.o
+*.out
+
+# Python tooling
+__pycache__/
+*.pyc
+
+# macOS
+.DS_Store
+
+# Local scratch
+/tmp/
