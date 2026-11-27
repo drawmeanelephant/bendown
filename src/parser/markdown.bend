@@ -2569,51 +2569,6 @@ def md_quote_listish_at(+s: String, +startcol: Nat) -> Bool:
 def md_quote_listish(+s: String) -> Bool:
   md_quote_listish_at(s, 0n)
 
-# Heuristic lazy-continuation gate for this milestone.  It recognizes the
-# common case of an open plain paragraph inside the quote.  Full laziness is
-# container-stack dependent and remains a later milestone.
-def md_quote_lazy_ok_at(+s: String, +startcol: Nat) -> Bool:
-  Bool.and(Bool.not(Text.blank_line(s)),
-    Bool.not(md_is_fence_start_at(s, startcol) || md_is_atx_at(s, startcol) || md_is_thematic_at(s, startcol) ||
-      md_is_quote_start_at(s, startcol) || md_quote_listish_at(s, startcol) || Nat.is_ge(md_marker_indent_at(s, startcol), 4n)))
-
-def md_quote_lazy_ok(+s: String) -> Bool:
-  md_quote_lazy_ok_at(s, 0n)
-
-def md_quote_lazy_candidate_ok_at(+s: String, +startcol: Nat) -> Bool:
-  Bool.and(Bool.not(Text.blank_line(s)),
-    Bool.not(md_is_fence_start_at(s, startcol) || md_is_atx_at(s, startcol) || md_is_thematic_at(s, startcol) ||
-      md_is_quote_start_at(s, startcol) || md_quote_listish_at(s, startcol)))
-
-def md_scan_quote_finish(acc: List<&2, MdLine>, rest: List<&2, MdLine>, +end: U32) -> LinesGrab:
-  LinesGrab{List.reverse(&2, MdLine, acc), rest, end}
-
-def md_scan_quote_go(
-  +xs: List<&2, MdLine>,
-  +acc: List<&2, MdLine>,
-  +end: U32,
-  +lazy_ok: Bool
-) -> LinesGrab:
-  match xs:
-    case Nil{}:
-      md_scan_quote_finish(acc, Nil{}, end)
-    case line <> rest:
-      +text = md_line_text(line)
-      +linecol = md_line_col(line)
-      ifs(LinesGrab, md_is_quote_start_at(text, linecol),
-        u =>
-          +stripped = md_quote_strip_line(line)
-          +next_lazy = md_quote_lazy_ok_at(md_line_text(stripped), md_line_col(stripped))
-          md_scan_quote_go(rest, stripped <> acc, md_line_end(line), next_lazy)
-        u =>
-          +lazy = Bool.and(lazy_ok, md_quote_lazy_candidate_ok_at(text, linecol))
-          ifs(LinesGrab, lazy,
-            v => md_scan_quote_go(rest, md_line_as_lazy(line) <> acc, md_line_end(line), lazy),
-            v => md_scan_quote_finish(acc, line <> rest, end)))
-
-def md_scan_quote(+xs: List<&2, MdLine>) -> LinesGrab:
-  md_scan_quote_go(xs, Nil{}, 0, False{})
-
 def md_drop_up_to_columns(+s: String, +n: Nat, +startcol: Nat) -> String:
   md_column_strip_text(md_strip_columns_from(s, n, startcol))
 
@@ -3156,6 +3111,74 @@ def md_initial_plain_paragraph_at(+s: String, +startcol: Nat) -> Bool:
 def md_initial_plain_paragraph(+s: String) -> Bool:
   md_initial_plain_paragraph_at(s, 0n)
 
+
+# Determine whether this line opens a plain paragraph at the deepest end of
+# a chain of quote/list containers.  Container scanners use that provenance
+# as their lazy-continuation state: a following line may omit markers only
+# while such a paragraph is open.  This remains deliberately initial-block
+# only; blank lines and intervening non-paragraph blocks close the state in
+# the scanners themselves.
+def md_container_plain_paragraph_go(fuel: Nat, +s: String, +startcol: Nat) -> Bool:
+  match fuel:
+    case 0n:
+      False{}
+    case 1n++f:
+      ifs(Bool, md_initial_plain_paragraph_at(s, startcol),
+        u => True{},
+        u =>
+          ifs(Bool, md_is_quote_start_at(s, startcol),
+            v =>
+              +strip = md_quote_strip_text_at(s, startcol)
+              +innercol = Nat.add(startcol, md_column_strip_cols(strip))
+              md_container_plain_paragraph_go(f, md_column_strip_text(strip), innercol),
+            v =>
+              +info = md_scan_list_marker_info_at(s, startcol)
+              ifs(Bool, mlmi_valid(info),
+                w => md_container_plain_paragraph_go(f, mlmi_content(info), mlmi_contentcol(info)),
+                w => False{})))
+
+def md_container_plain_paragraph_at(+s: String, +startcol: Nat) -> Bool:
+  md_container_plain_paragraph_go(Nat.add(String.length(s), 1n), s, startcol)
+
+def md_container_plain_paragraph(+s: String) -> Bool:
+  md_container_plain_paragraph_at(s, 0n)
+
+def md_quote_lazy_candidate_ok_at(+s: String, +startcol: Nat) -> Bool:
+  Bool.and(Bool.not(Text.blank_line(s)),
+    Bool.not(md_is_fence_start_at(s, startcol) || md_is_atx_at(s, startcol) || md_is_thematic_at(s, startcol) ||
+      md_is_quote_start_at(s, startcol) || md_quote_listish_at(s, startcol)))
+
+def md_scan_quote_finish(acc: List<&2, MdLine>, rest: List<&2, MdLine>, +end: U32) -> LinesGrab:
+  LinesGrab{List.reverse(&2, MdLine, acc), rest, end}
+
+def md_scan_quote_go(
+  +xs: List<&2, MdLine>,
+  +acc: List<&2, MdLine>,
+  +end: U32,
+  +lazy_ok: Bool
+) -> LinesGrab:
+  match xs:
+    case Nil{}:
+      md_scan_quote_finish(acc, Nil{}, end)
+    case line <> rest:
+      +text = md_line_text(line)
+      +linecol = md_line_col(line)
+      ifs(LinesGrab, md_is_quote_start_at(text, linecol),
+        u =>
+          +stripped = md_quote_strip_line(line)
+          +next_lazy = md_container_plain_paragraph_at(md_line_text(stripped), md_line_col(stripped))
+          md_scan_quote_go(rest, stripped <> acc, md_line_end(line), next_lazy)
+        u =>
+          +lazy = Bool.and(lazy_ok, md_quote_lazy_candidate_ok_at(text, linecol))
+          ifs(LinesGrab, lazy,
+            v => md_scan_quote_go(rest, md_line_as_lazy(line) <> acc, md_line_end(line), lazy),
+            v => md_scan_quote_finish(acc, line <> rest, end)))
+
+def md_scan_quote(+xs: List<&2, MdLine>) -> LinesGrab:
+  md_scan_quote_go(xs, Nil{}, 0, False{})
+
+
+
 def md_lazy_continuation_ok_at(+s: String, +startcol: Nat) -> Bool:
   Bool.and(U32.is_zero(md_setext_level_at(s, startcol)), Bool.not(md_is_paragraph_interrupt_at(s, startcol)))
 
@@ -3230,7 +3253,7 @@ def md_scan_raw_item(+line: MdLine, +rest: List<&2, MdLine>, +wanted_ordered: Bo
   +info = md_scan_list_marker_info_at(text, md_line_col(line))
   +content = mlmi_content(info)
   +first : MdLine = MdLine{content, md_pos_add(md_line_start(line), mlmi_contentchars(info)), md_line_end(line), mlmi_contentcol(info), False{}}
-  +paraopen = md_initial_plain_paragraph_at(content, mlmi_contentcol(info))
+  +paraopen = md_container_plain_paragraph_at(content, mlmi_contentcol(info))
   md_scan_list_item_go(rest, mlmi_contentindent(info), wanted_ordered, markcode,
     first <> Nil{}, Nil{}, md_line_end(line), mlmi_blankfirst(info), False{}, paraopen)
 
