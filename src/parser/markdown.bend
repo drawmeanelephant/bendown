@@ -1,6 +1,7 @@
 import Base
 import ../ast.bend as Ast
 import ../text.bend as Text
+import ../unicode.bend as Unicode
 
 # Clean-room Markdown parser, first milestone.
 #
@@ -1373,28 +1374,13 @@ def md_exact_delim_maybe(+s: String, +marker: Char, +width: Nat, m: Maybe<&2, Na
 def md_find_exact_delim(+s: String, +marker: Char, +width: Nat) -> Maybe<&2, StrSplit>:
   md_exact_delim_maybe(s, marker, width, md_find_exact_delim_index(s, marker, width, 0n, False{}))
 
-def md_emph_split(+s: String, +marker: Char, +width: Nat) -> Maybe<&2, StrSplit>:
-  md_find_exact_delim(String.drop(s, width), marker, width)
-
 def md_inline_space_code(+code: U32) -> Bool:
   U32.is_eq(code, 32) || U32.is_eq(code, 9) || U32.is_eq(code, 10) || U32.is_eq(code, 13)
 
-# Unicode whitespace for the small flanking approximation below.
 def md_unicode_space_code(+code: U32) -> Bool:
-  md_inline_space_code(code) || U32.is_eq(code, 160) || U32.is_eq(code, 5760) ||
-    Bool.and(U32.is_ge(code, 8192), U32.is_le(code, 8202)) ||
-    U32.is_eq(code, 8232) || U32.is_eq(code, 8233) || U32.is_eq(code, 8239) ||
-    U32.is_eq(code, 8287) || U32.is_eq(code, 12288)
-
-# A small part of the flanking rules: emphasis content may not begin or end
-# in Unicode/ASCII whitespace.  The full left/right-flanking lattice is a
-# later-milestone concern.
-def md_emph_content_ok(+content: String) -> Bool:
-  +len = String.length(content)
-  +first = md_str_at(content, 0n)
-  +last = md_str_at(content, Nat.sub(len, 1n))
-  Bool.and(Bool.not(String.is_empty(content)),
-    Bool.and(Bool.not(md_unicode_space_code(first)), Bool.not(md_unicode_space_code(last))))
+  md_inline_space_code(code) || U32.is_eq(code, 12) || U32.is_eq(code, 160) ||
+    U32.is_eq(code, 5760) || Bool.and(U32.is_ge(code, 8192), U32.is_le(code, 8202)) ||
+    U32.is_eq(code, 8239) || U32.is_eq(code, 8287) || U32.is_eq(code, 12288)
 
 # A unified validated link/image target plus the unconsumed input after it.
 type LinkChoice is Data:
@@ -1478,6 +1464,347 @@ def md_strip_alt_markup(s: String) -> String:
 def md_alt_text(+label: String) -> String:
   md_strip_alt_markup(md_decode_ee(label))
 
+
+type MdEmphDelim is Data:
+  MdEmphDelim{start: U32, end: U32, marker: Char, count: Nat, runlen: Nat,
+    can_open: Bool, can_close: Bool, both: Bool}
+
+def md_delim_start(x: MdEmphDelim) -> U32:
+  match x:
+    case MdEmphDelim{start, end, marker, count, runlen, can_open, can_close, both}:
+      start
+
+def md_delim_end(x: MdEmphDelim) -> U32:
+  match x:
+    case MdEmphDelim{start, end, marker, count, runlen, can_open, can_close, both}:
+      end
+
+def md_delim_marker(x: MdEmphDelim) -> Char:
+  match x:
+    case MdEmphDelim{start, end, marker, count, runlen, can_open, can_close, both}:
+      marker
+
+def md_delim_count(x: MdEmphDelim) -> Nat:
+  match x:
+    case MdEmphDelim{start, end, marker, count, runlen, can_open, can_close, both}:
+      count
+
+def md_delim_runlen(x: MdEmphDelim) -> Nat:
+  match x:
+    case MdEmphDelim{start, end, marker, count, runlen, can_open, can_close, both}:
+      runlen
+
+def md_delim_can_open(x: MdEmphDelim) -> Bool:
+  match x:
+    case MdEmphDelim{start, end, marker, count, runlen, can_open, can_close, both}:
+      can_open
+
+def md_delim_can_close(x: MdEmphDelim) -> Bool:
+  match x:
+    case MdEmphDelim{start, end, marker, count, runlen, can_open, can_close, both}:
+      can_close
+
+def md_delim_both(x: MdEmphDelim) -> Bool:
+  match x:
+    case MdEmphDelim{start, end, marker, count, runlen, can_open, can_close, both}:
+      both
+
+def md_unicode_punct_code(+code: U32) -> Bool:
+  Unicode.unicode_punct_or_symbol(Char.from_u32(code))
+
+def md_make_emph_delim(+start: U32, +end: U32, +marker: Char, +count: Nat,
+    +runlen: Nat, +can_open: Bool, +can_close: Bool) -> MdEmphDelim:
+  +both = Bool.and(can_open, can_close)
+  (MdEmphDelim{start, end, marker, count, runlen, can_open, can_close, both} : MdEmphDelim)
+
+def md_scan_delims_go(fuel: Nat, +s: String, +pos: U32, +hasprev: Bool, +prevcode: U32,
+    +hasend: Bool, +endcode: U32, +acc: List<&2, MdEmphDelim>) -> List<&2, MdEmphDelim>:
+  match fuel:
+    case 0n:
+      acc
+    case 1n++f:
+      match s:
+        case SNil{}:
+          acc
+        case SCon{'\\', SCon{+h, +t}}:
+          ifs(List<&2, MdEmphDelim>, Text.ascii_punctuation(h),
+            u => md_scan_delims_go(f, t, md_pos_add(pos, 2n), True{}, Char.to_u32(h), hasend, endcode, acc),
+            u => md_scan_delims_go(f, SCon{h, t}, md_pos_add(pos, 1n), True{}, 92, hasend, endcode, acc))
+        case SCon{'\\', +t}:
+          md_scan_delims_go(f, t, md_pos_add(pos, 1n), True{}, 92, hasend, endcode, acc)
+        case SCon{+h, +t}:
+          ifs(List<&2, MdEmphDelim>, md_is_emphasis_char(h),
+            u =>
+              +tailrun = md_count_prefix(t, h, 0n)
+              +run = Nat.add(1n, tailrun)
+              +after = String.drop(t, tailrun)
+              +endpos = md_pos_add(pos, run)
+              +afterend = String.is_empty(after)
+              +aftercode = md_str_at(after, 0n)
+              +prevws = ifs(Bool, hasprev,
+                v => md_unicode_space_code(prevcode),
+                v => True{})
+              +prevpu = ifs(Bool, hasprev,
+                v => md_unicode_punct_code(prevcode),
+                v => False{})
+              +afterws = ifs(Bool, afterend,
+                v => ifs(Bool, hasend,
+                  w => md_unicode_space_code(endcode),
+                  w => True{}),
+                v => md_unicode_space_code(aftercode))
+              +afterpu = ifs(Bool, afterend,
+                v => ifs(Bool, hasend,
+                  w => md_unicode_punct_code(endcode),
+                  w => False{}),
+                v => md_unicode_punct_code(aftercode))
+              +left = Bool.and(Bool.not(afterws),
+                Bool.or(Bool.not(afterpu), Bool.or(prevws, prevpu)))
+              +right = Bool.and(Bool.not(prevws),
+                Bool.or(Bool.not(prevpu), Bool.or(afterws, afterpu)))
+              +open = ifs(Bool, Char.is_eq(h, '*'),
+                v => left,
+                v => Bool.and(left, Bool.or(Bool.not(right), prevpu)))
+              +close = ifs(Bool, Char.is_eq(h, '*'),
+                v => right,
+                v => Bool.and(right, Bool.or(Bool.not(left), afterpu)))
+              +hit = md_make_emph_delim(pos, endpos, h, run, run, open, close)
+              md_scan_delims_go(f, after, endpos, True{}, Char.to_u32(h), hasend, endcode, hit <> acc),
+            u => md_scan_delims_go(f, t, md_pos_add_text(pos, md_char_string(h)), True{}, Char.to_u32(h), hasend, endcode, acc))
+
+def md_scan_delim_infos_ctx(+s: String, +pos: U32, +hasprev: Bool, +prevcode: U32,
+    +hasend: Bool, +endcode: U32) -> List<&2, MdEmphDelim>:
+  +fuel = Nat.add(String.length(s), 1n)
+  List.reverse(&2, MdEmphDelim,
+    md_scan_delims_go(fuel, s, pos, hasprev, prevcode, hasend, endcode, Nil{}))
+
+def md_scan_delim_infos(+s: String, +pos: U32) -> List<&2, MdEmphDelim>:
+  md_scan_delim_infos_ctx(s, pos, False{}, 0, False{}, 0)
+
+type MdEmphTok is Data:
+  MdTokNode{node: Ast.Inline}
+  MdTokDelim{delim: MdEmphDelim}
+
+def md_make_tok_node(+node: Ast.Inline) -> MdEmphTok:
+  (MdTokNode{node} : MdEmphTok)
+
+def md_make_tok_delim(+delim: MdEmphDelim) -> MdEmphTok:
+  (MdTokDelim{delim} : MdEmphTok)
+
+def md_cons_tok_node(+node: Ast.Inline, +tail: List<&2, MdEmphTok>) -> List<&2, MdEmphTok>:
+  +tok = md_make_tok_node(node)
+  tok <> tail
+
+def md_cons_tok_delim(+delim: MdEmphDelim, +tail: List<&2, MdEmphTok>) -> List<&2, MdEmphTok>:
+  +tok = md_make_tok_delim(delim)
+  tok <> tail
+
+def md_make_span(+start: U32, +end: U32) -> Ast.Span:
+  (Ast.Span{start, end} : Ast.Span)
+
+def md_span_start(x: Ast.Span) -> U32:
+  match x:
+    case Ast.Span{start, end}:
+      start
+
+def md_span_end(x: Ast.Span) -> U32:
+  match x:
+    case Ast.Span{start, end}:
+      end
+
+def md_delim_at(+xs: List<&2, MdEmphDelim>, +start: U32, +end: U32) -> Maybe<&2, MdEmphDelim>:
+  match xs:
+    case Nil{}:
+      None{}
+    case +h <> t:
+      ifs(Maybe<&2, MdEmphDelim>,
+        Bool.and(U32.is_eq(md_delim_start(h), start), U32.is_eq(md_delim_end(h), end)),
+        u => Some{h},
+        u => md_delim_at(t, start, end))
+
+def md_emph_tokenize_text(+text: String, +span: Ast.Span,
+    +infos: List<&2, MdEmphDelim>) -> MdEmphTok:
+  maybe_case(MdEmphDelim, MdEmphTok,
+    md_delim_at(infos, md_span_start(span), md_span_end(span)),
+    +delim => md_make_tok_delim(delim),
+    u => md_make_tok_node(Ast.IText{text, span}))
+
+def md_emph_tokenize(+infos: List<&2, MdEmphDelim>, xs: List<&2, Ast.Inline>) -> List<&2, MdEmphTok>:
+  match xs:
+    case Nil{}:
+      Nil{}
+    case h <> t:
+      match h:
+        case Ast.IText{text, span}:
+          md_emph_tokenize_text(text, span, infos) <> md_emph_tokenize(infos, t)
+        case u:
+          md_make_tok_node(u) <> md_emph_tokenize(infos, t)
+
+def md_emph_tok_finish(tok: MdEmphTok) -> Ast.Inline:
+  match tok:
+    case MdTokNode{node}:
+      node
+    case MdTokDelim{+delim}:
+      +text = md_repeat_char(md_delim_marker(delim), md_delim_count(delim))
+      Ast.IText{text, md_make_span(md_delim_start(delim), md_delim_end(delim))}
+
+def md_emph_finalize_tokens(xs: List<&2, MdEmphTok>) -> List<&2, Ast.Inline>:
+  match xs:
+    case Nil{}:
+      Nil{}
+    case h <> t:
+      md_emph_tok_finish(h) <> md_emph_finalize_tokens(t)
+
+type MdEmphHit is Data:
+  MdEmphHit{index: Nat, delim: MdEmphDelim}
+
+def md_make_emph_hit(+index: Nat, +delim: MdEmphDelim) -> MdEmphHit:
+  (MdEmphHit{index, delim} : MdEmphHit)
+
+def md_emph_hit_index(x: MdEmphHit) -> Nat:
+  match x:
+    case MdEmphHit{index, delim}:
+      index
+
+def md_emph_hit_delim(x: MdEmphHit) -> MdEmphDelim:
+  match x:
+    case MdEmphHit{index, delim}:
+      delim
+
+def md_emph_close_ready(+d: MdEmphDelim) -> Bool:
+  Bool.and(md_delim_can_close(d), Nat.is_gt(md_delim_count(d), 0n))
+
+def md_find_emph_closer_go(xs: List<&2, MdEmphTok>, +idx: Nat) -> Maybe<&2, MdEmphHit>:
+  match xs:
+    case Nil{}:
+      None{}
+    case h <> t:
+      match h:
+        case MdTokNode{node}:
+          md_find_emph_closer_go(t, 1n+idx)
+        case MdTokDelim{+delim}:
+          ifs(Maybe<&2, MdEmphHit>, md_emph_close_ready(delim),
+            u => Some{md_make_emph_hit(idx, delim)},
+            u => md_find_emph_closer_go(t, 1n+idx))
+
+def md_find_emph_closer(+xs: List<&2, MdEmphTok>) -> Maybe<&2, MdEmphHit>:
+  md_find_emph_closer_go(xs, 0n)
+
+def md_emph_lengths_ok(+orun: Nat, +crun: Nat, +oboth: Bool, +cboth: Bool) -> Bool:
+  +sum = Nat.add(orun, crun)
+  +sum3 = Nat.is_eq(Nat.mod(sum, 3n), 0n)
+  +om3 = Nat.is_eq(Nat.mod(orun, 3n), 0n)
+  +cm3 = Nat.is_eq(Nat.mod(crun, 3n), 0n)
+  +blocked = Bool.and(Bool.or(oboth, cboth),
+    Bool.and(sum3, Bool.not(Bool.and(om3, cm3))))
+  Bool.not(blocked)
+
+def md_delim_open_compatible(+op: MdEmphDelim, +cl: MdEmphDelim) -> Bool:
+  Bool.and(Char.is_eq(md_delim_marker(op), md_delim_marker(cl)),
+    Bool.and(md_delim_can_open(op),
+      Bool.and(Nat.is_gt(md_delim_count(op), 0n),
+        md_emph_lengths_ok(md_delim_runlen(op), md_delim_runlen(cl),
+          md_delim_both(op), md_delim_both(cl)))))
+
+def md_find_emph_opener_go(xs: List<&2, MdEmphTok>, +idx: Nat,
+    +best: Maybe<&2, MdEmphHit>, +closer: MdEmphDelim) -> Maybe<&2, MdEmphHit>:
+  match xs:
+    case Nil{}:
+      best
+    case h <> t:
+      match h:
+        case MdTokNode{node}:
+          md_find_emph_opener_go(t, 1n+idx, best, closer)
+        case MdTokDelim{+delim}:
+          +hit = md_delim_open_compatible(delim, closer)
+          +newbest = Bool.pick(Maybe<&2, MdEmphHit>, hit, Some{md_make_emph_hit(idx, delim)}, best)
+          md_find_emph_opener_go(t, 1n+idx, newbest, closer)
+
+def md_find_emph_opener(+xs: List<&2, MdEmphTok>, +closer: MdEmphDelim) -> Maybe<&2, MdEmphHit>:
+  md_find_emph_opener_go(xs, 0n, None{}, closer)
+
+def md_delim_open_remainder(+d: MdEmphDelim, +count: Nat) -> MdEmphDelim:
+  match d:
+    case MdEmphDelim{start, end, marker, oldcount, runlen, can_open, can_close, both}:
+      MdEmphDelim{start, U32.add(start, U32.from_nat(count)), marker, count, runlen, can_open, can_close, both}
+
+def md_delim_close_remainder(+d: MdEmphDelim, +count: Nat) -> MdEmphDelim:
+  match d:
+    case MdEmphDelim{start, end, marker, oldcount, runlen, can_open, can_close, both}:
+      MdEmphDelim{U32.sub(end, U32.from_nat(count)), end, marker, count, runlen, can_open, can_close, both}
+
+def md_delim_close_off(+d: MdEmphDelim) -> MdEmphDelim:
+  match d:
+    case MdEmphDelim{start, end, marker, count, runlen, can_open, can_close, both}:
+      MdEmphDelim{start, end, marker, count, runlen, can_open, False{}, both}
+
+def md_emph_cons_remainder(+d: MdEmphDelim, +xs: List<&2, MdEmphTok>) -> List<&2, MdEmphTok>:
+  ifs(List<&2, MdEmphTok>, Nat.is_gt(md_delim_count(d), 0n),
+    u => md_cons_tok_delim(d, xs),
+    u => xs)
+
+def md_make_iemph(+children: List<&2, Ast.Inline>, +span: Ast.Span) -> Ast.Inline:
+  (Ast.IEmph{children, span} : Ast.Inline)
+
+def md_make_istrong(+children: List<&2, Ast.Inline>, +span: Ast.Span) -> Ast.Inline:
+  (Ast.IStrong{children, span} : Ast.Inline)
+
+def md_emph_wrap_tokens(+tokens: List<&2, MdEmphTok>, +oi: Nat, +ci: Nat,
+    +op: MdEmphDelim, +cl: MdEmphDelim) -> List<&2, MdEmphTok>:
+  +use = Bool.pick(Nat,
+    Bool.and(Nat.is_ge(md_delim_count(op), 2n), Nat.is_ge(md_delim_count(cl), 2n)),
+    2n, 1n)
+  +openleft = Nat.sub(md_delim_count(op), use)
+  +closeleft = Nat.sub(md_delim_count(cl), use)
+  +newop = md_delim_open_remainder(op, openleft)
+  +newcl = md_delim_close_remainder(cl, closeleft)
+  +middlelen = Nat.sub(ci, Nat.add(oi, 1n))
+  +middle = List.take(&2, MdEmphTok, List.drop(&2, MdEmphTok, tokens, Nat.add(oi, 1n)), middlelen)
+  +inner = md_emph_finalize_tokens(middle)
+  +span = md_make_span(U32.sub(md_delim_end(op), U32.from_nat(use)), U32.add(md_delim_start(cl), U32.from_nat(use)))
+  +node = Bool.pick(Ast.Inline, Nat.is_eq(use, 2n),
+    md_make_istrong(inner, span),
+    md_make_iemph(inner, span))
+  +before = List.take(&2, MdEmphTok, tokens, oi)
+  +after = List.drop(&2, MdEmphTok, tokens, Nat.add(ci, 1n))
+  +tail = md_emph_cons_remainder(newcl, after)
+  +center = md_cons_tok_node(node, tail)
+  +front = md_emph_cons_remainder(newop, center)
+  List.append(&2, MdEmphTok, before, front)
+
+def md_emph_process(fuel: Nat, +tokens: List<&2, MdEmphTok>) -> List<&2, Ast.Inline>:
+  match fuel:
+    case 0n:
+      md_emph_finalize_tokens(tokens)
+    case 1n++f:
+      maybe_case(MdEmphHit, List<&2, Ast.Inline>, md_find_emph_closer(tokens),
+        +closerhit =>
+          +ci = md_emph_hit_index(closerhit)
+          +cl = md_emph_hit_delim(closerhit)
+          +beforecloser = List.take(&2, MdEmphTok, tokens, ci)
+          maybe_case(MdEmphHit, List<&2, Ast.Inline>, md_find_emph_opener(beforecloser, cl),
+            +openerhit =>
+              +oi = md_emph_hit_index(openerhit)
+              +op = md_emph_hit_delim(openerhit)
+              md_emph_process(f, md_emph_wrap_tokens(tokens, oi, ci, op, cl)),
+            u =>
+              +newcloser = md_delim_close_off(cl)
+              md_emph_process(f,
+                List.set(&2, MdEmphTok, tokens, ci, md_make_tok_delim(newcloser)))),
+        u => md_emph_finalize_tokens(tokens))
+
+def md_emph_resolve_input_ctx(+s: String, +pos: U32, +hasprev: Bool, +prevcode: U32,
+    +hasend: Bool, +endcode: U32, xs: List<&2, Ast.Inline>) -> List<&2, Ast.Inline>:
+  +infos = md_scan_delim_infos_ctx(s, pos, hasprev, prevcode, hasend, endcode)
+  +tokens = md_emph_tokenize(infos, xs)
+  +len = Text.utf8_length(s)
+  md_emph_process(Nat.add(Nat.mul(8n, len), 8n), tokens)
+
+def md_emph_resolve_input(+s: String, +pos: U32, xs: List<&2, Ast.Inline>) -> List<&2, Ast.Inline>:
+  md_emph_resolve_input_ctx(s, pos, False{}, 0, False{}, 0, xs)
+
+def md_emph_resolve_link_label_input(+s: String, +pos: U32, xs: List<&2, Ast.Inline>) -> List<&2, Ast.Inline>:
+  md_emph_resolve_input_ctx(s, pos, True{}, 91, True{}, 93, xs)
+
 # Inline scanner.  It is one recursive definition, so there is no mutual
 # recursion; nested content and the continuation both recurse on fuel's
 # predecessor.  Malformed delimiters consume at least one byte as literal text.
@@ -1554,7 +1881,9 @@ def md_parse_inlines(fuel: Nat, +refs: List<&2, RefDef>, +s: String, +pos: U32) 
                   +label_start = md_pos_add(pos, 1n)
                   +used = Nat.sub(Text.utf8_length(s), Text.utf8_length(rest))
                   +endpos = md_pos_add(pos, used)
-                  Ast.ILink{md_parse_inlines(f, refs, label, label_start), link_target_href(goodtarget),
+                  +labelinner0 = md_parse_inlines(f, refs, label, label_start)
+                  +labelinner = md_emph_resolve_link_label_input(label, label_start, labelinner0)
+                  Ast.ILink{labelinner, link_target_href(goodtarget),
                     link_target_title(goodtarget), Ast.Span{pos, endpos}} <>
                     md_parse_inlines(f, refs, rest, endpos),
                 z => Ast.IText{"[", md_span_text(pos, "[")} <>
@@ -1616,27 +1945,10 @@ def md_parse_inlines(fuel: Nat, +refs: List<&2, RefDef>, +s: String, +pos: U32) 
           ifs(List<&2, Ast.Inline>, md_is_emphasis_char(h),
             u =>
               +run = md_count_prefix(s, h, 0n)
-              +width = ifs(Nat, Nat.is_ge(run, 2n), v => 2n, v => 1n)
-              +delimiter = md_repeat_char(h, width)
-              maybe_case(StrSplit, List<&2, Ast.Inline>, md_emph_split(s, h, width),
-                +hit =>
-                  +content = str_split_before(hit)
-                  +rest = str_split_after(hit)
-                  +content_start = md_pos_add(pos, width)
-                  +content_end = md_pos_add_text(content_start, content)
-                  +endpos = md_pos_add(content_end, width)
-                  ifs(List<&2, Ast.Inline>, Bool.not(md_emph_content_ok(content)),
-                    v => Ast.IText{delimiter, md_span_text(pos, delimiter)} <>
-                      md_parse_inlines(f, refs, String.drop(s, width), md_pos_add_text(pos, delimiter)),
-                    v =>
-                      +inner = md_parse_inlines(f, refs, content, content_start)
-                      ifs(List<&2, Ast.Inline>, Nat.is_eq(width, 2n),
-                        w => Ast.IStrong{inner, Ast.Span{pos, endpos}} <>
-                          md_parse_inlines(f, refs, rest, endpos),
-                        w => Ast.IEmph{inner, Ast.Span{pos, endpos}} <>
-                          md_parse_inlines(f, refs, rest, endpos)))
-                v => Ast.IText{delimiter, md_span_text(pos, delimiter)} <>
-                  md_parse_inlines(f, refs, String.drop(s, width), md_pos_add_text(pos, delimiter)))
+              +delimiter = md_repeat_char(h, run)
+              +endpos = md_pos_add(pos, run)
+              Ast.IText{delimiter, Ast.Span{pos, endpos}} <>
+                md_parse_inlines(f, refs, String.drop(s, run), endpos)
             u =>
               +n = md_plain_index(s, 0n)
               +plain0 = String.take(s, n)
@@ -1677,7 +1989,8 @@ def md_parse_inlines(fuel: Nat, +refs: List<&2, RefDef>, +s: String, +pos: U32) 
 def md_parse_inlines_top(+refs: List<&2, RefDef>, +s: String, +pos: U32) -> List<&2, Ast.Inline>:
   +len = Text.utf8_length(s)
   +fuel = Nat.add(Nat.mul(8n, len), 8n)
-  md_parse_inlines(fuel, refs, s, pos)
+  +scanned = md_parse_inlines(fuel, refs, s, pos)
+  md_emph_resolve_input(s, pos, scanned)
 
 # Block parsing
 # =============
