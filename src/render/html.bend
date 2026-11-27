@@ -154,53 +154,79 @@ def strip_trailing_linebreaks(s: String) -> String:
 def render_verbatim_block(profile: HtmlProfile, text: String) -> String:
   render_raw_fragment(profile, strip_trailing_linebreaks(text)) ++ "\n"
 
-def render_inlines(xs: List<&2, Ast.Inline>, +profile: HtmlProfile) -> String:
+def identity_link_rewrite(ctx: Unit, target: String) -> String:
+  target
+
+def render_inlines_with_link_rewrite(~C: Data, ~rewrite: C -> String -> String,
+  xs: List<&2, Ast.Inline>, +profile: HtmlProfile, +ctx: C) -> String:
   match xs:
     case Nil{}:
       ""
     case h <> t:
       match h:
         case Ast.IText{text, span}:
-          escape_html(text) ++ render_inlines(t, profile)
+          escape_html(text) ++ render_inlines_with_link_rewrite(~C, ~rewrite, t, profile, ctx)
         case Ast.ICode{text, span}:
-          "<code>" ++ escape_html(text) ++ "</code>" ++ render_inlines(t, profile)
+          "<code>" ++ escape_html(text) ++ "</code>" ++ render_inlines_with_link_rewrite(~C, ~rewrite, t, profile, ctx)
         case Ast.IEmph{children, span}:
-          "<em>" ++ render_inlines(children, profile) ++ "</em>" ++ render_inlines(t, profile)
+          "<em>" ++ render_inlines_with_link_rewrite(~C, ~rewrite,
+            children, profile, ctx) ++ "</em>" ++
+            render_inlines_with_link_rewrite(~C, ~rewrite, t, profile, ctx)
         case Ast.IStrong{children, span}:
-          "<strong>" ++ render_inlines(children, profile) ++ "</strong>" ++ render_inlines(t, profile)
+          "<strong>" ++ render_inlines_with_link_rewrite(~C, ~rewrite,
+            children, profile, ctx) ++ "</strong>" ++
+            render_inlines_with_link_rewrite(~C, ~rewrite, t, profile, ctx)
         case Ast.IBold{children, span}:
-          "<b>" ++ render_inlines(children, profile) ++ "</b>" ++ render_inlines(t, profile)
+          "<b>" ++ render_inlines_with_link_rewrite(~C, ~rewrite,
+            children, profile, ctx) ++ "</b>" ++
+            render_inlines_with_link_rewrite(~C, ~rewrite, t, profile, ctx)
         case Ast.IItalic{children, span}:
-          "<i>" ++ render_inlines(children, profile) ++ "</i>" ++ render_inlines(t, profile)
+          "<i>" ++ render_inlines_with_link_rewrite(~C, ~rewrite,
+            children, profile, ctx) ++ "</i>" ++
+            render_inlines_with_link_rewrite(~C, ~rewrite, t, profile, ctx)
         case Ast.IDeleted{children, span}:
-          "<del>" ++ render_inlines(children, profile) ++ "</del>" ++ render_inlines(t, profile)
+          "<del>" ++ render_inlines_with_link_rewrite(~C, ~rewrite,
+            children, profile, ctx) ++ "</del>" ++
+            render_inlines_with_link_rewrite(~C, ~rewrite, t, profile, ctx)
         case Ast.IInserted{children, span}:
-          "<ins>" ++ render_inlines(children, profile) ++ "</ins>" ++ render_inlines(t, profile)
+          "<ins>" ++ render_inlines_with_link_rewrite(~C, ~rewrite,
+            children, profile, ctx) ++ "</ins>" ++
+            render_inlines_with_link_rewrite(~C, ~rewrite, t, profile, ctx)
         case Ast.ISuperscript{children, span}:
-          "<sup>" ++ render_inlines(children, profile) ++ "</sup>" ++ render_inlines(t, profile)
+          "<sup>" ++ render_inlines_with_link_rewrite(~C, ~rewrite,
+            children, profile, ctx) ++ "</sup>" ++
+            render_inlines_with_link_rewrite(~C, ~rewrite, t, profile, ctx)
         case Ast.ISubscript{children, span}:
-          "<sub>" ++ render_inlines(children, profile) ++ "</sub>" ++ render_inlines(t, profile)
+          "<sub>" ++ render_inlines_with_link_rewrite(~C, ~rewrite,
+            children, profile, ctx) ++ "</sub>" ++
+            render_inlines_with_link_rewrite(~C, ~rewrite, t, profile, ctx)
         case Ast.ISpan{children, attrs, span}:
-          "<span" ++ render_attrs(attrs) ++ ">" ++ render_inlines(children, profile) ++
-            "</span>" ++ render_inlines(t, profile)
+          "<span" ++ render_attrs(attrs) ++ ">" ++ render_inlines_with_link_rewrite(~C, ~rewrite,
+            children, profile, ctx) ++ "</span>" ++
+            render_inlines_with_link_rewrite(~C, ~rewrite, t, profile, ctx)
         case Ast.ILink{children, href, title, span}:
-          "<a href=\"" ++ escape_html(href) ++ "\"" ++ render_title_attr(title) ++ ">" ++
-            render_inlines(children, profile) ++ "</a>" ++ render_inlines(t, profile)
+          "<a href=\"" ++ escape_html(rewrite(ctx, href)) ++ "\"" ++ render_title_attr(title) ++ ">" ++
+            render_inlines_with_link_rewrite(~C, ~rewrite, children, profile, ctx) ++ "</a>" ++
+            render_inlines_with_link_rewrite(~C, ~rewrite, t, profile, ctx)
         case Ast.IImage{src, alt, title, span}:
-          "<img src=\"" ++ escape_html(src) ++ "\" alt=\"" ++ escape_html(alt) ++ "\"" ++
-            render_title_attr(title) ++ void_close(profile) ++ render_inlines(t, profile)
+          "<img src=\"" ++ escape_html(rewrite(ctx, src)) ++ "\" alt=\"" ++ escape_html(alt) ++ "\"" ++
+            render_title_attr(title) ++ void_close(profile) ++
+            render_inlines_with_link_rewrite(~C, ~rewrite, t, profile, ctx)
         case Ast.IAutolink{href, label, span}:
-          "<a href=\"" ++ escape_html(href) ++ "\">" ++ escape_html(label) ++ "</a>" ++
-            render_inlines(t, profile)
+          "<a href=\"" ++ escape_html(rewrite(ctx, href)) ++ "\">" ++ escape_html(label) ++ "</a>" ++
+            render_inlines_with_link_rewrite(~C, ~rewrite, t, profile, ctx)
         case Ast.IRawHtml{text, span}:
-          render_raw_fragment(profile, text) ++ render_inlines(t, profile)
+          render_raw_fragment(profile, text) ++ render_inlines_with_link_rewrite(~C, ~rewrite, t, profile, ctx)
         case Ast.ISoftBreak{span}:
-          "\n" ++ render_inlines(t, profile)
+          "\n" ++ render_inlines_with_link_rewrite(~C, ~rewrite, t, profile, ctx)
         case Ast.IHardBreak{span}:
-          "<br" ++ void_close(profile) ++ "\n" ++ render_inlines(t, profile)
+          "<br" ++ void_close(profile) ++ "\n" ++ render_inlines_with_link_rewrite(~C, ~rewrite, t, profile, ctx)
         case Ast.IFootnoteRef{+number, span}:
           "<sup class=\"footnote-ref\"><a href=\"#fn-" ++ U32.show(number) ++ "\">" ++
-            U32.show(number) ++ "</a></sup>" ++ render_inlines(t, profile)
+            U32.show(number) ++ "</a></sup>" ++ render_inlines_with_link_rewrite(~C, ~rewrite, t, profile, ctx)
+
+def render_inlines(xs: List<&2, Ast.Inline>, +profile: HtmlProfile) -> String:
+  render_inlines_with_link_rewrite(~Unit, ~identity_link_rewrite, xs, profile, Unit{})
 
 def clamp_heading_level(+level: U32) -> U32:
   Bool.pick(U32, U32.is_lt(level, 1), 1,
@@ -283,14 +309,18 @@ def effective_cell_align(align: Ast.Alignment, column: Maybe<&2, Ast.Alignment>)
 # Tables contain inline text rather than nested blocks, so their rows and
 # cells are ordinary structurally recursive lists and do not need the block
 # recursion budget below.
-def render_table_cell(cell: Ast.TableCell, column: Maybe<&2, Ast.Alignment>,
-  +profile: HtmlProfile) -> String:
+def render_table_cell_with_link_rewrite(~C: Data, ~rewrite: C -> String -> String,
+  cell: Ast.TableCell, column: Maybe<&2, Ast.Alignment>, +profile: HtmlProfile, +ctx: C) -> String:
   match cell:
     case Ast.TableCell{header, align, colspan, rowspan, children, attrs, span}:
       +tag = Bool.pick(String, header, "th", "td")
       "<" ++ tag ++
         render_attrs(table_cell_attrs(attrs, effective_cell_align(align, column), colspan, rowspan)) ++
-        ">" ++ render_inlines(children, profile) ++ "</" ++ tag ++ ">"
+        ">" ++ render_inlines_with_link_rewrite(~C, ~rewrite, children, profile, ctx) ++ "</" ++ tag ++ ">"
+
+def render_table_cell(cell: Ast.TableCell, column: Maybe<&2, Ast.Alignment>,
+  +profile: HtmlProfile) -> String:
+  render_table_cell_with_link_rewrite(~Unit, ~identity_link_rewrite, cell, column, profile, Unit{})
 
 def effective_colspan(+colspan: U32) -> U32:
   Bool.pick(U32, U32.is_eq(colspan, 0), 1, colspan)
@@ -300,57 +330,86 @@ def table_cell_colspan(cell: Ast.TableCell) -> U32:
     case Ast.TableCell{header, align, +colspan, rowspan, children, attrs, span}:
       effective_colspan(colspan)
 
-def render_table_cells(cells: List<&2, Ast.TableCell>, columns: List<&2, Ast.Alignment>,
-  +profile: HtmlProfile) -> String:
+def render_table_cells_with_link_rewrite(~C: Data, ~rewrite: C -> String -> String,
+  cells: List<&2, Ast.TableCell>, columns: List<&2, Ast.Alignment>, +profile: HtmlProfile,
+  +ctx: C) -> String:
   match cells:
     case Nil{}:
       ""
     case +h <> t:
       match columns:
         case Nil{}:
-          render_table_cell(h, None{}, profile) ++ render_table_cells(t, Nil{}, profile)
+          render_table_cell_with_link_rewrite(~C, ~rewrite, h, None{}, profile, ctx) ++
+            render_table_cells_with_link_rewrite(~C, ~rewrite, t, Nil{}, profile, ctx)
         case column <> rest_columns:
           +span = table_cell_colspan(h)
-          render_table_cell(h, Some{column}, profile) ++
-            render_table_cells(t,
-              List.drop(&2, Ast.Alignment, rest_columns, U32.to_nat(U32.sub(span, 1))), profile)
+          render_table_cell_with_link_rewrite(~C, ~rewrite, h, Some{column}, profile, ctx) ++
+            render_table_cells_with_link_rewrite(~C, ~rewrite, t,
+              List.drop(&2, Ast.Alignment, rest_columns, U32.to_nat(U32.sub(span, 1))), profile, ctx)
 
-def render_table_rows(rows: List<&2, Ast.TableRow>, +alignments: List<&2, Ast.Alignment>,
+def render_table_cells(cells: List<&2, Ast.TableCell>, columns: List<&2, Ast.Alignment>,
   +profile: HtmlProfile) -> String:
+  render_table_cells_with_link_rewrite(~Unit, ~identity_link_rewrite, cells, columns, profile, Unit{})
+
+def render_table_rows_with_link_rewrite(~C: Data, ~rewrite: C -> String -> String,
+  rows: List<&2, Ast.TableRow>, +alignments: List<&2, Ast.Alignment>, +profile: HtmlProfile,
+  +ctx: C) -> String:
   match rows:
     case Nil{}:
       ""
     case Ast.TableRow{cells, attrs, span} <> t:
-      "<tr" ++ render_attrs(attrs) ++ ">" ++ render_table_cells(cells, alignments, profile) ++
-        "</tr>\n" ++ render_table_rows(t, alignments, profile)
+      "<tr" ++ render_attrs(attrs) ++ ">" ++
+        render_table_cells_with_link_rewrite(~C, ~rewrite, cells, alignments, profile, ctx) ++
+        "</tr>\n" ++ render_table_rows_with_link_rewrite(~C, ~rewrite, t, alignments, profile, ctx)
+
+def render_table_rows(rows: List<&2, Ast.TableRow>, +alignments: List<&2, Ast.Alignment>,
+  +profile: HtmlProfile) -> String:
+  render_table_rows_with_link_rewrite(~Unit, ~identity_link_rewrite, rows, alignments, profile, Unit{})
 
 # A tight-list paragraph without attributes has no <p> wrapper.  Attributes
 # force the wrapper back on: dropping them would lose document information.
-def render_paragraph_tight(attrs: List<&2, Ast.Attr>, children: List<&2, Ast.Inline>,
-  profile: HtmlProfile) -> String:
+def render_paragraph_tight_with_link_rewrite(~C: Data, ~rewrite: C -> String -> String,
+  attrs: List<&2, Ast.Attr>, children: List<&2, Ast.Inline>, profile: HtmlProfile, +ctx: C) -> String:
   match attrs:
     case Nil{}:
-      render_inlines(children, profile) ++ "\n"
+      render_inlines_with_link_rewrite(~C, ~rewrite, children, profile, ctx) ++ "\n"
     case u:
-      "<p" ++ render_attrs(u) ++ ">" ++ render_inlines(children, profile) ++ "</p>\n"
+      "<p" ++ render_attrs(u) ++ ">" ++
+        render_inlines_with_link_rewrite(~C, ~rewrite, children, profile, ctx) ++ "</p>\n"
+
+def render_paragraph_tight(attrs: List<&2, Ast.Attr>, children: List<&2, Ast.Inline>,
+  profile: HtmlProfile) -> String:
+  render_paragraph_tight_with_link_rewrite(~Unit, ~identity_link_rewrite, attrs, children, profile, Unit{})
+
+def render_paragraph_block_with_link_rewrite(~C: Data, ~rewrite: C -> String -> String,
+  children: List<&2, Ast.Inline>, attrs: List<&2, Ast.Attr>, profile: HtmlProfile, tight: Bool,
+  +ctx: C) -> String:
+  match tight:
+    case True{}:
+      render_paragraph_tight_with_link_rewrite(~C, ~rewrite, attrs, children, profile, ctx)
+    case False{}:
+      "<p" ++ render_attrs(attrs) ++ ">" ++
+        render_inlines_with_link_rewrite(~C, ~rewrite, children, profile, ctx) ++ "</p>\n"
 
 def render_paragraph_block(children: List<&2, Ast.Inline>, attrs: List<&2, Ast.Attr>,
   profile: HtmlProfile, tight: Bool) -> String:
-  match tight:
-    case True{}:
-      render_paragraph_tight(attrs, children, profile)
-    case False{}:
-      "<p" ++ render_attrs(attrs) ++ ">" ++ render_inlines(children, profile) ++ "</p>\n"
+  render_paragraph_block_with_link_rewrite(~Unit, ~identity_link_rewrite, children, attrs, profile, tight, Unit{})
 
 # The same tight-paragraph rule for a one-block item, without the newline that
 # belongs to block layout; this keeps the common tight-list case on one line.
-def render_tight_single_paragraph(attrs: List<&2, Ast.Attr>, children: List<&2, Ast.Inline>,
-  profile: HtmlProfile) -> String:
+def render_tight_single_paragraph_with_link_rewrite(~C: Data,
+  ~rewrite: C -> String -> String, attrs: List<&2, Ast.Attr>, children: List<&2, Ast.Inline>,
+  profile: HtmlProfile, +ctx: C) -> String:
   match attrs:
     case Nil{}:
-      render_inlines(children, profile)
+      render_inlines_with_link_rewrite(~C, ~rewrite, children, profile, ctx)
     case u:
-      "<p" ++ render_attrs(u) ++ ">" ++ render_inlines(children, profile) ++ "</p>"
+      "<p" ++ render_attrs(u) ++ ">" ++ render_inlines_with_link_rewrite(~C, ~rewrite, children, profile, ctx) ++ "</p>"
+
+def render_tight_single_paragraph(attrs: List<&2, Ast.Attr>, children: List<&2, Ast.Inline>,
+  profile: HtmlProfile) -> String:
+  render_tight_single_paragraph_with_link_rewrite(~Unit, ~identity_link_rewrite, attrs, children,
+    profile, Unit{})
 
 # A single recursive dispatcher for blocks and list items.  Bend does not
 # admit mutual recursion, so the Nat budget makes the recursion structurally
@@ -363,7 +422,8 @@ type BlockWork is Data:
   WorkTightItemBlocks{blocks: List<&2, Ast.Block>, first: Bool}
   WorkItems{items: List<&2, Ast.ListItem>, tight: Bool}
 
-def render_block_work(+fuel: Nat, +profile: HtmlProfile, work: BlockWork) -> String:
+def render_block_work_with_link_rewrite(~C: Data, ~rewrite: C -> String -> String,
+  +fuel: Nat, +profile: HtmlProfile, work: BlockWork, +ctx: C) -> String:
   match fuel:
     case 0n:
       ""
@@ -372,11 +432,11 @@ def render_block_work(+fuel: Nat, +profile: HtmlProfile, work: BlockWork) -> Str
         case WorkBlock{block, tight_para}:
           match block:
             case Ast.BParagraph{children, attrs, span}:
-              render_paragraph_block(children, attrs, profile, tight_para)
+              render_paragraph_block_with_link_rewrite(~C, ~rewrite, children, attrs, profile, tight_para, ctx)
             case Ast.BHeading{+level, children, attrs, span}:
               +n = clamp_heading_level(level)
               "<h" ++ U32.show(n) ++ render_attrs(attrs) ++ ">" ++
-                render_inlines(children, profile) ++ "</h" ++ U32.show(n) ++ ">\n"
+                render_inlines_with_link_rewrite(~C, ~rewrite, children, profile, ctx) ++ "</h" ++ U32.show(n) ++ ">\n"
             case Ast.BThematicBreak{span}:
               "<hr" ++ void_close(profile) ++ "\n"
             case Ast.BCodeBlock{text, info, attrs, span}:
@@ -386,12 +446,16 @@ def render_block_work(+fuel: Nat, +profile: HtmlProfile, work: BlockWork) -> Str
               render_verbatim_block(profile, text)
             case Ast.BBlockQuote{blocks, attrs, cite, span}:
               "<blockquote" ++ render_attrs(attrs) ++ render_cite_attr(cite) ++ ">\n" ++
-                render_block_work(f, profile, WorkBlocks{blocks, False{}}) ++ "</blockquote>\n"
+                render_block_work_with_link_rewrite(~C, ~rewrite, f, profile,
+                  WorkBlocks{blocks, False{}}, ctx) ++ "</blockquote>\n"
             case Ast.BList{+ordered, +start, tight, items, span}:
-              list_open(ordered, start) ++ render_block_work(f, profile, WorkItems{items, tight}) ++
-                list_close(ordered)
+              list_open(ordered, start) ++
+                render_block_work_with_link_rewrite(~C, ~rewrite, f, profile,
+                  WorkItems{items, tight}, ctx) ++ list_close(ordered)
             case Ast.BTable{alignments, rows, span}:
-              "<table>\n" ++ render_table_rows(rows, alignments, profile) ++ "</table>\n"
+              "<table>\n" ++
+                render_table_rows_with_link_rewrite(~C, ~rewrite, rows, alignments, profile, ctx) ++
+                "</table>\n"
             case Ast.BRawPassthrough{text, span}:
               render_verbatim_block(profile, text)
         case WorkBlocks{blocks, +tight_para}:
@@ -399,8 +463,8 @@ def render_block_work(+fuel: Nat, +profile: HtmlProfile, work: BlockWork) -> Str
             case Nil{}:
               ""
             case h <> t:
-              render_block_work(f, profile, WorkBlock{h, tight_para}) ++
-                render_block_work(f, profile, WorkBlocks{t, tight_para})
+              render_block_work_with_link_rewrite(~C, ~rewrite, f, profile, WorkBlock{h, tight_para}, ctx) ++
+                render_block_work_with_link_rewrite(~C, ~rewrite, f, profile, WorkBlocks{t, tight_para}, ctx)
         case WorkTightItemBlocks{blocks, +first}:
           match blocks:
             case Nil{}:
@@ -408,15 +472,17 @@ def render_block_work(+fuel: Nat, +profile: HtmlProfile, work: BlockWork) -> Str
             case Ast.BParagraph{children, attrs, span} <> restblocks:
               match restblocks:
                 case Nil{}:
-                  render_tight_single_paragraph(attrs, children, profile)
+                  render_tight_single_paragraph_with_link_rewrite(~C, ~rewrite, attrs, children, profile, ctx)
                 case more:
-                  render_paragraph_tight(attrs, children, profile) ++
-                    render_block_work(f, profile, WorkTightItemBlocks{more, False{}})
+                  render_paragraph_tight_with_link_rewrite(~C, ~rewrite, attrs, children, profile, ctx) ++
+                    render_block_work_with_link_rewrite(~C, ~rewrite, f, profile,
+                      WorkTightItemBlocks{more, False{}}, ctx)
             case h <> restblocks:
-              +rendered = render_block_work(f, profile, WorkBlock{h, True{}})
+              +rendered = render_block_work_with_link_rewrite(~C, ~rewrite, f, profile, WorkBlock{h, True{}}, ctx)
               +prefix = Bool.pick(String, first, "\n", "")
               prefix ++ rendered ++
-                render_block_work(f, profile, WorkTightItemBlocks{restblocks, False{}})
+                render_block_work_with_link_rewrite(~C, ~rewrite, f, profile,
+                  WorkTightItemBlocks{restblocks, False{}}, ctx)
         case WorkItems{items, +tight}:
           match items:
             case Nil{}:
@@ -424,15 +490,24 @@ def render_block_work(+fuel: Nat, +profile: HtmlProfile, work: BlockWork) -> Str
             case Ast.ListItem{blocks, span} <> t:
               match blocks:
                 case Nil{}:
-                  "<li></li>\n" ++ render_block_work(f, profile, WorkItems{t, tight})
+                  "<li></li>\n" ++
+                    render_block_work_with_link_rewrite(~C, ~rewrite, f, profile,
+                      WorkItems{t, tight}, ctx)
                 case u:
                   match tight:
                     case True{}:
-                      "<li>" ++ render_block_work(f, profile, WorkTightItemBlocks{u, True{}}) ++
-                        "</li>\n" ++ render_block_work(f, profile, WorkItems{t, tight})
+                      "<li>" ++ render_block_work_with_link_rewrite(~C, ~rewrite, f, profile,
+                        WorkTightItemBlocks{u, True{}}, ctx) ++ "</li>\n" ++
+                        render_block_work_with_link_rewrite(~C, ~rewrite, f, profile,
+                          WorkItems{t, tight}, ctx)
                     case False{}:
-                      "<li>\n" ++ render_block_work(f, profile, WorkBlocks{u, False{}}) ++
-                        "</li>\n" ++ render_block_work(f, profile, WorkItems{t, tight})
+                      "<li>\n" ++ render_block_work_with_link_rewrite(~C, ~rewrite, f, profile,
+                        WorkBlocks{u, False{}}, ctx) ++ "</li>\n" ++
+                        render_block_work_with_link_rewrite(~C, ~rewrite, f, profile,
+                          WorkItems{t, tight}, ctx)
+
+def render_block_work(+fuel: Nat, +profile: HtmlProfile, work: BlockWork) -> String:
+  render_block_work_with_link_rewrite(~Unit, ~identity_link_rewrite, fuel, profile, work, Unit{})
 
 def render_block_budget() -> Nat:
   4294967295n
@@ -456,6 +531,13 @@ def render_block_with_profile(profile: HtmlProfile, block: Ast.Block) -> String:
 
 def render_document_with_profile(profile: HtmlProfile, document: Ast.Document) -> String:
   render_document_with_profile_fuel(profile, document, render_block_budget())
+
+def render_document_with_link_rewrite(~C: Data, ~rewrite: C -> String -> String,
+  +ctx: C, document: Ast.Document) -> String:
+  match document:
+    case Ast.Document{blocks}:
+      render_block_work_with_link_rewrite(~C, ~rewrite, render_block_budget(), Html{},
+        WorkBlocks{blocks, False{}}, ctx)
 
 def render_inline(inline: Ast.Inline) -> String:
   render_inline_with_profile(Html{}, inline)
