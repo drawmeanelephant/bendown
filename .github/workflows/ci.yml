@@ -59,7 +59,7 @@ jobs:
       - name: Build batch CLI
         run: ~/.bend/bin/bend src/batch_cli.bend -o /tmp/bendown-batch
 
-      - name: CommonMark corpus ratchet (floor 631/652)
+      - name: CommonMark corpus ratchet (floor 647/652)
         run: |
           python3 tools/differential.py commonmark \
             --cmd /tmp/bendown-bin --timeout 10 --failures 0 \
@@ -71,7 +71,7 @@ jobs:
           for k, v in x['sections'].items():
               if v['passed'] != v['total']:
                   print(f"  {k}: {v['passed']}/{v['total']}")
-          floor = 631
+          floor = 647
           if x['passed'] < floor:
               raise SystemExit(
                   f"REGRESSION: {x['passed']}/{x['total']} is below the ratchet floor {floor}")
@@ -79,10 +79,12 @@ jobs:
           if emphasis['passed'] != emphasis['total']:
               raise SystemExit(
                   f"REGRESSION: emphasis section is {emphasis['passed']}/{emphasis['total']}")
-          tabs = x['sections']['Tabs']
-          if tabs['passed'] != tabs['total']:
-              raise SystemExit(
-                  f"REGRESSION: tabs section is {tabs['passed']}/{tabs['total']}")
+          for section in (
+              'Tabs', 'Setext headings', 'Code spans', 'Links', 'Images'):
+              got = x['sections'][section]
+              if got['passed'] != got['total']:
+                  raise SystemExit(
+                      f"REGRESSION: {section} section is {got['passed']}/{got['total']}")
           if x.get('errors'):
               raise SystemExit(f"runner errors: {x['errors']}")
           PYEOF
