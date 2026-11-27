@@ -2118,24 +2118,6 @@ def digit_scan_value(x: DigitScan) -> U32:
     case DigitScan{count, value}:
       value
 
-type SimpleListGrab is Data:
-  SimpleListGrab{items: List<&2, Ast.ListItem>, rest: List<&2, MdLine>, end: U32}
-
-def simple_list_grab_items(x: SimpleListGrab) -> List<&2, Ast.ListItem>:
-  match x:
-    case SimpleListGrab{items, rest, end}:
-      items
-
-def simple_list_grab_rest(x: SimpleListGrab) -> List<&2, MdLine>:
-  match x:
-    case SimpleListGrab{items, rest, end}:
-      rest
-
-def simple_list_grab_end(x: SimpleListGrab) -> U32:
-  match x:
-    case SimpleListGrab{items, rest, end}:
-      end
-
 # Up to three ASCII spaces are block-marker indentation in this milestone.
 # Tabs are preserved as literal indentation except in blank-line detection.
 def md_marker_indent(+s: String) -> Nat:
@@ -2614,110 +2596,8 @@ def md_list_marker_width(+s: String, ordered: Bool) -> Nat:
     case False{}:
       Nat.add(md_marker_indent(s), 1n)
 
-def md_list_strip_line(+line: MdLine, +ordered: Bool) -> MdLine:
-  +text = md_line_text(line)
-  +width = md_list_marker_width(text, ordered)
-  +content = md_trim_start(String.drop(text, width))
-  +removed = Nat.sub(Text.utf8_length(text), Text.utf8_length(content))
-  MdLine{content, md_pos_add(md_line_start(line), removed), md_line_end(line)}
-
-# Indentation required of a simple continuation line: marker width plus the
-# one-to-four spaces following it when present.  Tabs remain a milestone
-# approximation.
-def md_list_item_indent(+s: String, +ordered: Bool) -> Nat:
-  +raw = md_list_marker_width(s, ordered)
-  +spaces = md_count_prefix(String.drop(s, raw), ' ', 0n)
-  ifs(Nat, Nat.is_eq(spaces, 0n),
-    u => raw,
-    u => Nat.add(raw, Nat.min(spaces, 4n)))
-
-# Collect nonblank continuation lines indented by at least the item's content
-# indentation.  They are joined into the item's single paragraph in this
-# milestone; nested blocks inside list items are not yet modeled.
-def md_scan_list_cont_go(
-  +xs: List<&2, MdLine>,
-  +indent: Nat,
-  +acc: List<&2, String>,
-  +end: U32
-) -> StringLinesGrab:
-  match xs:
-    case Nil{}:
-      md_scan_fenced_finish(acc, Nil{}, end)
-    case line <> rest:
-      +text = md_line_text(line)
-      +takeit = Bool.and(Bool.not(Text.blank_line(text)), Nat.is_ge(md_marker_indent(text), indent))
-      ifs(StringLinesGrab, takeit,
-        u => md_scan_list_cont_go(rest, indent,
-          md_drop_up_to_spaces(text, indent) <> acc, md_line_end(line)),
-        u => md_scan_fenced_finish(acc, line <> rest, end))
-
-def md_scan_list_cont(+xs: List<&2, MdLine>, +indent: Nat, +startend: U32) -> StringLinesGrab:
-  md_scan_list_cont_go(xs, indent, Nil{}, startend)
-
-# Marker identity used to keep adjacent-but-different simple lists apart:
-# bullet byte for unordered lists, `.`/`)` byte for ordered lists.
-def md_list_marker_code(+s: String, ordered: Bool) -> U32:
-  match ordered:
-    case True{}:
-      md_str_at(s, Nat.add(md_marker_indent(s), digit_scan_count(md_ordered_scan(s))))
-    case False{}:
-      md_str_at(s, md_marker_indent(s))
-
-def md_scan_list_finish(+acc: List<&2, Ast.ListItem>, rest: List<&2, MdLine>, +end: U32) -> SimpleListGrab:
-  SimpleListGrab{List.reverse(&2, Ast.ListItem, acc), rest, end}
-
-def md_scan_list_go(
-  fuel: Nat,
-  +refs: List<&2, RefDef>,
-  +xs: List<&2, MdLine>,
-  +ordered: Bool,
-  +markcode: U32,
-  +acc: List<&2, Ast.ListItem>,
-  +end: U32
-) -> SimpleListGrab:
-  match fuel:
-    case 0n:
-      md_scan_list_finish(acc, xs, end)
-    case 1n++f:
-      match xs:
-        case Nil{}:
-          md_scan_list_finish(acc, Nil{}, end)
-        case line <> rest:
-          +text = md_line_text(line)
-          +this_ordered = md_is_ordered_item(text)
-          +this_unordered = md_is_unordered_item(text)
-          +typevalid = ifs(Bool, ordered,
-            u => this_ordered,
-            u => this_unordered)
-          +thismark = md_list_marker_code(text, this_ordered)
-          +valid = Bool.and(typevalid, U32.is_eq(thismark, markcode))
-          ifs(SimpleListGrab, valid,
-            u =>
-              +stripped = md_list_strip_line(line, ordered)
-              +firstcontent = md_line_text(stripped)
-              +content_start = md_line_start(stripped)
-              +contentindent = md_list_item_indent(text, ordered)
-              +cont = md_scan_list_cont(rest, contentindent, md_line_end(line))
-              +content = String.join(firstcontent <> string_lines_grab_lines(cont), "\n")
-              +span : Ast.Span = Ast.Span{md_line_start(line), string_lines_grab_end(cont)}
-              +inlines = md_parse_inlines_top(refs, content, content_start)
-              para : Ast.Block = Ast.BParagraph{inlines, [], span}
-              item : Ast.ListItem = Ast.ListItem{[para], span}
-              md_scan_list_go(f, refs, string_lines_grab_rest(cont), ordered, markcode,
-                item <> acc, string_lines_grab_end(cont))
-            u => md_scan_list_finish(acc, line <> rest, end))
-
-def md_scan_list(+refs: List<&2, RefDef>, +xs: List<&2, MdLine>, +ordered: Bool) -> SimpleListGrab:
-  match xs:
-    case Nil{}:
-      SimpleListGrab{Nil{}, Nil{}, 0}
-    case line <> rest:
-      +len = List.length(&2, MdLine, xs)
-      +fuel = Nat.add(Nat.mul(4n, len), 4n)
-      md_scan_list_go(fuel, refs, xs, ordered, md_list_marker_code(md_line_text(line), ordered), Nil{}, 0)
-
-# Paragraph collection.  A Setext underline is recognized before generic
-# interruption because `---` is also a valid thematic-break marker.
+# Paragraph-interruption predicates are needed by both the structural list
+# scanner (for conservative lazy continuation) and paragraph collection.
 def md_html_interrupts_paragraph(+s: String) -> Bool:
   +kind = md_html_block_kind(s)
   Bool.and(Nat.is_ne(kind, 0n), Nat.is_ne(kind, 7n))
@@ -2743,6 +2623,353 @@ def md_is_paragraph_interrupt(+s: String) -> Bool:
   md_is_fence_start(s) || md_is_atx(s) || md_is_thematic(s) ||
     md_is_quote_start(s) || md_list_interrupts_paragraph(s) || md_html_interrupts_paragraph(s)
 
+# Structural list-region scanner
+# ------------------------------
+#
+# The scanner below is deliberately pure with respect to block parsing: it
+# recognizes list markers, calculates the content indentation required by
+# CommonMark rules 1--4, extracts the physical lines belonging to each item,
+# removes that item indentation from continuation lines, and records whether
+# sibling items were separated by blank lines.  It never constructs blocks;
+# the fueled block dispatcher later parses each extracted item region
+# recursively.
+
+type MdListMarkerInfo is Data:
+  MdListMarkerInfo{valid: Bool, ordered: Bool, start: U32, markcode: U32,
+    contentindent: Nat, blankfirst: Bool, content: String}
+
+def mlmi_valid(x: MdListMarkerInfo) -> Bool:
+  match x:
+    case MdListMarkerInfo{valid, ordered, start, markcode, contentindent, blankfirst, content}:
+      valid
+
+def mlmi_ordered(x: MdListMarkerInfo) -> Bool:
+  match x:
+    case MdListMarkerInfo{valid, ordered, start, markcode, contentindent, blankfirst, content}:
+      ordered
+
+def mlmi_start(x: MdListMarkerInfo) -> U32:
+  match x:
+    case MdListMarkerInfo{valid, ordered, start, markcode, contentindent, blankfirst, content}:
+      start
+
+def mlmi_markcode(x: MdListMarkerInfo) -> U32:
+  match x:
+    case MdListMarkerInfo{valid, ordered, start, markcode, contentindent, blankfirst, content}:
+      markcode
+
+def mlmi_contentindent(x: MdListMarkerInfo) -> Nat:
+  match x:
+    case MdListMarkerInfo{valid, ordered, start, markcode, contentindent, blankfirst, content}:
+      contentindent
+
+def mlmi_blankfirst(x: MdListMarkerInfo) -> Bool:
+  match x:
+    case MdListMarkerInfo{valid, ordered, start, markcode, contentindent, blankfirst, content}:
+      blankfirst
+
+def mlmi_content(x: MdListMarkerInfo) -> String:
+  match x:
+    case MdListMarkerInfo{valid, ordered, start, markcode, contentindent, blankfirst, content}:
+      content
+
+# Count spaces and tabs as marker padding characters.  Tabs are still an
+# approximation in this line-oriented implementation; the official list-item
+# examples exercise spaces, and full tab-column expansion is a separate
+# milestone.
+def md_count_space_tab(s: String, +acc: Nat) -> Nat:
+  match s:
+    case SNil{}:
+      acc
+    case SCon{' ', t}:
+      md_count_space_tab(t, 1n+acc)
+    case SCon{'\t', t}:
+      md_count_space_tab(t, 1n+acc)
+    case u:
+      acc
+
+# Analyze a physical line as a possible list marker.  `contentindent` is
+# measured in spaces from the start of the current container region and
+# includes the up-to-three spaces allowed before the marker.  If more than
+# four padding characters follow the marker, rule 2 applies: only one padding
+# character is consumed, so the remaining indentation can form the initial
+# indented-code block.
+def md_scan_list_marker_info(+s: String) -> MdListMarkerInfo:
+  +indent = md_marker_indent(s)
+  +scan = md_ordered_scan(s)
+  +digits = digit_scan_count(scan)
+  +mark = md_str_at(s, indent)
+  +nextbullet = md_str_at(s, Nat.add(indent, 1n))
+  +bulletchar = U32.is_eq(mark, 45) || U32.is_eq(mark, 43) || U32.is_eq(mark, 42)
+  +unordered = Bool.and(Nat.is_le(indent, 3n), Bool.and(bulletchar, md_list_space_ok(nextbullet)))
+  +delim = md_str_at(s, Nat.add(indent, digits))
+  +nextordered = md_str_at(s, Nat.add(Nat.add(indent, digits), 1n))
+  +orderedshape = Bool.and(Nat.is_ge(digits, 1n),
+    Bool.and(Nat.is_le(digits, 9n),
+      Bool.and(U32.is_eq(delim, 46) || U32.is_eq(delim, 41), md_list_space_ok(nextordered))))
+  +ordered = Bool.and(Nat.is_le(indent, 3n), orderedshape)
+  +valid = unordered || ordered
+  +markwidth = ifs(Nat, ordered,
+    u => Nat.add(digits, 1n),
+    u => 1n)
+  +markerend = Nat.add(indent, markwidth)
+  +after = String.drop(s, markerend)
+  +padchars = md_count_space_tab(after, 0n)
+  +blankfirst = Text.blank_line(after)
+  +wide = Nat.is_gt(padchars, 4n)
+  +normalpad = Bool.pick(Nat, wide, 1n, padchars)
+  +padding = Bool.pick(Nat, blankfirst, 1n, normalpad)
+  +dropn = Bool.pick(Nat, blankfirst, String.length(after), normalpad)
+  +content = String.drop(after, dropn)
+  +markcode = ifs(U32, ordered,
+    u => delim,
+    u => mark)
+  +start = ifs(U32, ordered,
+    u => digit_scan_value(scan),
+    u => 1)
+  MdListMarkerInfo{valid, ordered, start, markcode,
+    Nat.add(markerend, padding), blankfirst, content}
+
+def md_ordered_type_matches(candidate: Bool, wanted: Bool) -> Bool:
+  match wanted:
+    case True{}:
+      candidate
+    case False{}:
+      Bool.not(candidate)
+
+# A sibling item must have the same bullet character or the same ordered
+# delimiter.  A line that is itself a thematic break is never a list item.
+def md_same_list_marker(+s: String, wanted_ordered: Bool, +markcode: U32) -> Bool:
+  +info = md_scan_list_marker_info(s)
+  +typeok = md_ordered_type_matches(mlmi_ordered(info), wanted_ordered)
+  Bool.and(mlmi_valid(info),
+    Bool.and(typeok,
+      Bool.and(U32.is_eq(mlmi_markcode(info), markcode), Bool.not(md_is_thematic(s)))))
+
+# While a list container is open, any well-formed list marker at a shallower
+# indentation is a container boundary before lazy paragraph continuation is
+# considered.  Whether it continues the current list or starts a following
+# list is decided only after the current item has ended.
+def md_any_list_marker(+s: String) -> Bool:
+  +info = md_scan_list_marker_info(s)
+  Bool.and(mlmi_valid(info), Bool.not(md_is_thematic(s)))
+
+type MdRawItem is Data:
+  MdRawItem{lines: List<&2, MdLine>, start: U32, end: U32}
+
+def md_raw_item_lines(x: MdRawItem) -> List<&2, MdLine>:
+  match x:
+    case MdRawItem{lines, start, end}:
+      lines
+
+def md_raw_item_start(x: MdRawItem) -> U32:
+  match x:
+    case MdRawItem{lines, start, end}:
+      start
+
+def md_raw_item_end(x: MdRawItem) -> U32:
+  match x:
+    case MdRawItem{lines, start, end}:
+      end
+
+type MdRawListGrab is Data:
+  MdRawListGrab{items: List<&2, MdRawItem>, rest: List<&2, MdLine>, end: U32, loose: Bool}
+
+def md_raw_list_grab_items(x: MdRawListGrab) -> List<&2, MdRawItem>:
+  match x:
+    case MdRawListGrab{items, rest, end, loose}:
+      items
+
+def md_raw_list_grab_rest(x: MdRawListGrab) -> List<&2, MdLine>:
+  match x:
+    case MdRawListGrab{items, rest, end, loose}:
+      rest
+
+def md_raw_list_grab_end(x: MdRawListGrab) -> U32:
+  match x:
+    case MdRawListGrab{items, rest, end, loose}:
+      end
+
+def md_raw_list_grab_loose(x: MdRawListGrab) -> Bool:
+  match x:
+    case MdRawListGrab{items, rest, end, loose}:
+      loose
+
+# `xs` is in original order and `acc` is reversed.  The result is still
+# reversed, with every element of `xs` preceding the old accumulated lines.
+def md_rev_onto(+xs: List<&2, MdLine>, +acc: List<&2, MdLine>) -> List<&2, MdLine>:
+  match xs:
+    case Nil{}:
+      acc
+    case h <> t:
+      md_rev_onto(t, h <> acc)
+
+def md_restore_pending(+pendingrev: List<&2, MdLine>, +tail: List<&2, MdLine>) -> List<&2, MdLine>:
+  List.append(&2, MdLine, List.reverse(&2, MdLine, pendingrev), tail)
+
+def md_item_scan_finish(
+  +accrev: List<&2, MdLine>,
+  +pendingrev: List<&2, MdLine>,
+  +tail: List<&2, MdLine>,
+  +end: U32
+) -> LinesGrab:
+  LinesGrab{List.reverse(&2, MdLine, accrev), md_restore_pending(pendingrev, tail), end}
+
+def md_item_scan_eof(+accrev: List<&2, MdLine>, +end: U32) -> LinesGrab:
+  LinesGrab{List.reverse(&2, MdLine, accrev), Nil{}, end}
+
+def md_strip_list_cont_line(+line: MdLine, +indent: Nat) -> MdLine:
+  +text = md_line_text(line)
+  +content = md_drop_up_to_spaces(text, indent)
+  +removed = Nat.sub(Text.utf8_length(text), Text.utf8_length(content))
+  MdLine{content, md_pos_add(md_line_start(line), removed), md_line_end(line)}
+
+# Conservative provenance test for the simple open-paragraph case in rule 5
+# (laziness).  It deliberately never reopens a paragraph after another block;
+# nested-container laziness still requires the open-container spine planned
+# for a later milestone.  Lines beginning with `[` are excluded because a
+# reference definition is not a paragraph and container-aware reference
+# scanning is not yet available.
+def md_initial_plain_paragraph(+s: String) -> Bool:
+  +trimmed = md_trim_start(s)
+  +htmlkind = md_html_block_kind(s)
+  +blockstart = md_is_fence_start(s) || md_is_atx(s) || md_is_thematic(s) ||
+    md_is_quote_start(s) || md_is_list_item(s) || Nat.is_ne(htmlkind, 0n)
+  Bool.and(Bool.not(Text.blank_line(s)),
+    Bool.and(Bool.not(md_is_indented_code_line(s)),
+      Bool.and(Bool.not(String.starts_with(trimmed, "[")), Bool.not(blockstart))))
+
+def md_lazy_continuation_ok(+s: String) -> Bool:
+  Bool.and(U32.is_zero(md_setext_level(s)), Bool.not(md_is_paragraph_interrupt(s)))
+
+def md_lazy_closes_paragraph(+s: String) -> Bool:
+  Bool.or(Bool.not(U32.is_zero(md_setext_level(s))), md_is_paragraph_interrupt(s))
+
+# Collect continuation lines for one item.  Blank lines are held in
+# `pendingrev` until the next nonblank line proves that the item continues.
+# If it does not, those blanks are restored to the returned remainder so the
+# list-level scanner can decide whether they separate sibling items.  A
+# blank-first item may begin with at most one blank line, so an additional
+# pending blank before its first nonblank continuation blocks continuation.
+def md_scan_list_item_go(
+  +xs: List<&2, MdLine>,
+  +contentindent: Nat,
+  +wanted_ordered: Bool,
+  +markcode: U32,
+  +accrev: List<&2, MdLine>,
+  +pendingrev: List<&2, MdLine>,
+  +end: U32,
+  +emptywait: Bool,
+  +pendingblank: Bool,
+  +paraopen: Bool
+) -> LinesGrab:
+  match xs:
+    case Nil{}:
+      md_item_scan_eof(accrev, end)
+    case +line <> rest:
+      +text = md_line_text(line)
+      ifs(LinesGrab, Text.blank_line(text),
+        u => md_scan_list_item_go(rest, contentindent, wanted_ordered, markcode,
+          accrev, line <> pendingrev, end, emptywait, True{}, paraopen),
+        u =>
+          +indented = Nat.is_ge(md_marker_indent(text), contentindent)
+          +initialblocked = Bool.and(emptywait, pendingblank)
+          +takecont = Bool.and(indented, Bool.not(initialblocked))
+          ifs(LinesGrab, takecont,
+            v =>
+              +stripped = md_strip_list_cont_line(line, contentindent)
+              +pendingorig = List.reverse(&2, MdLine, pendingrev)
+              +accwithblanks = md_rev_onto(pendingorig, accrev)
+              +closespara = md_lazy_closes_paragraph(md_line_text(stripped))
+              +newparaopen = Bool.and(paraopen,
+                Bool.and(Bool.not(pendingblank), Bool.not(closespara)))
+              md_scan_list_item_go(rest, contentindent, wanted_ordered, markcode,
+                stripped <> accwithblanks, Nil{}, md_line_end(line), False{}, False{}, newparaopen),
+            v =>
+              +containerboundary = md_any_list_marker(text)
+              +lazybase = Bool.and(paraopen, Bool.not(pendingblank))
+              +lazy = Bool.and(Bool.not(containerboundary),
+                Bool.and(lazybase, md_lazy_continuation_ok(text)))
+              ifs(LinesGrab, lazy,
+                w =>
+                  +pendingorig2 = List.reverse(&2, MdLine, pendingrev)
+                  +accwithblanks2 = md_rev_onto(pendingorig2, accrev)
+                  md_scan_list_item_go(rest, contentindent, wanted_ordered, markcode,
+                    line <> accwithblanks2, Nil{}, md_line_end(line), False{}, False{}, paraopen),
+                w => md_item_scan_finish(accrev, pendingrev, line <> rest, end))))
+
+# Extract the body of one item.  The first line is rewritten to the content
+# after its marker/padding; continuation lines are rewritten by removing the
+# item content indentation.  Positions remain approximate UTF-8 byte offsets.
+def md_scan_raw_item(+line: MdLine, +rest: List<&2, MdLine>, +wanted_ordered: Bool, +markcode: U32) -> LinesGrab:
+  +text = md_line_text(line)
+  +info = md_scan_list_marker_info(text)
+  +content = mlmi_content(info)
+  +removed = Nat.sub(Text.utf8_length(text), Text.utf8_length(content))
+  +first : MdLine = MdLine{content, md_pos_add(md_line_start(line), removed), md_line_end(line)}
+  +paraopen = md_initial_plain_paragraph(content)
+  md_scan_list_item_go(rest, mlmi_contentindent(info), wanted_ordered, markcode,
+    first <> Nil{}, Nil{}, md_line_end(line), mlmi_blankfirst(info), False{}, paraopen)
+
+def md_raw_list_finish(
+  +accrev: List<&2, MdRawItem>,
+  +rest: List<&2, MdLine>,
+  +end: U32,
+  loose: Bool
+) -> MdRawListGrab:
+  MdRawListGrab{List.reverse(&2, MdRawItem, accrev), rest, end, loose}
+
+# Group sibling items.  Blank lines at a boundary are consumed only after an
+# item has ended; when the next nonblank line is a same-type marker they are
+# recorded as item separation and make the list loose.  A different marker or
+# non-marker line is left for the outer block parser.
+def md_scan_raw_list_go(
+  fuel: Nat,
+  +xs: List<&2, MdLine>,
+  +wanted_ordered: Bool,
+  +markcode: U32,
+  +accrev: List<&2, MdRawItem>,
+  +loose: Bool,
+  +end: U32,
+  +pendingrev: List<&2, MdLine>,
+  +blanks: Nat
+) -> MdRawListGrab:
+  match fuel:
+    case 0n:
+      md_raw_list_finish(accrev, md_restore_pending(pendingrev, xs), end, loose)
+    case 1n++f:
+      match xs:
+        case Nil{}:
+          md_raw_list_finish(accrev, md_restore_pending(pendingrev, Nil{}), end, loose)
+        case line <> rest:
+          +text = md_line_text(line)
+          ifs(MdRawListGrab, Text.blank_line(text),
+            u => md_scan_raw_list_go(f, rest, wanted_ordered, markcode, accrev, loose, end,
+              line <> pendingrev, 1n+blanks),
+            u =>
+              ifs(MdRawListGrab, md_same_list_marker(text, wanted_ordered, markcode),
+                v =>
+                  +itemscan = md_scan_raw_item(line, rest, wanted_ordered, markcode)
+                  +itemlines = lines_grab_lines(itemscan)
+                  +itemend = lines_grab_end(itemscan)
+                  item : MdRawItem = MdRawItem{itemlines, md_line_start(line), itemend}
+                  +seploose = Nat.is_gt(blanks, 0n)
+                  md_scan_raw_list_go(f, lines_grab_rest(itemscan), wanted_ordered, markcode,
+                    item <> accrev, loose || seploose, itemend, Nil{}, 0n),
+                v => md_raw_list_finish(accrev, md_restore_pending(pendingrev, line <> rest), end, loose)))
+
+def md_scan_raw_list(+xs: List<&2, MdLine>, ordered: Bool) -> MdRawListGrab:
+  match xs:
+    case Nil{}:
+      MdRawListGrab{Nil{}, Nil{}, 0, False{}}
+    case line <> rest:
+      +len = List.length(&2, MdLine, xs)
+      +fuel = Nat.add(Nat.mul(4n, len), 4n)
+      +markcode = mlmi_markcode(md_scan_list_marker_info(md_line_text(line)))
+      md_scan_raw_list_go(fuel, xs, ordered, markcode, Nil{}, False{}, 0, Nil{}, 0n)
+
+# Paragraph collection.  A Setext underline is recognized before generic
+# interruption because `---` is also a valid thematic-break marker.
 def md_scan_paragraph_finish(
   +acc: List<&2, MdLine>,
   rest: List<&2, MdLine>,
@@ -2819,100 +3046,189 @@ def md_make_thematic_block(+start: U32, +end: U32) -> Ast.Block:
 def md_make_quote_block(inner: List<&2, Ast.Block>, +start: U32, +end: U32) -> Ast.Block:
   Ast.BBlockQuote{inner, [], None{}, Ast.Span{start, end}}
 
-def md_make_list_block(+ordered: Bool, +startnum: U32, items: List<&2, Ast.ListItem>, +start: U32, +end: U32) -> Ast.Block:
-  Ast.BList{ordered, startnum, True{}, items, Ast.Span{start, end}}
+def md_make_list_block(+ordered: Bool, +startnum: U32, tight: Bool, items: List<&2, Ast.ListItem>, +start: U32, +end: U32) -> Ast.Block:
+  Ast.BList{ordered, startnum, tight, items, Ast.Span{start, end}}
+
+def md_make_html_block(+text: String, +start: U32, +end: U32) -> Ast.Block:
+  Ast.BHtmlBlock{text, Ast.Span{start, end}}
 
 def md_maybe_info(+info: String) -> Maybe<&2, String>:
   ifs(Maybe<&2, String>, String.is_empty(info),
     u => None{},
     u => Some{info})
 
+# One recursion-owning block dispatcher.  `MdWorkLines` parses a sequence of
+# lines, while `MdWorkItems` parses the already extracted line regions of list
+# items.  Keeping both modes in this one definition gives list parsing direct
+# self-recursion without prohibited mutual recursion: scan helpers never call
+# back into block construction.
+type MdParseWork is Data:
+  MdWorkLines{lines: List<&2, MdLine>, seenblock: Bool, blankafter: Bool, loose: Bool}
+  MdWorkItems{items: List<&2, MdRawItem>, loose: Bool}
+
+type MdParseOut is Data:
+  MdParseOut{blocks: List<&2, Ast.Block>, items: List<&2, Ast.ListItem>, loose: Bool}
+
+def md_parse_out_blocks(x: MdParseOut) -> List<&2, Ast.Block>:
+  match x:
+    case MdParseOut{blocks, items, loose}:
+      blocks
+
+def md_parse_out_items(x: MdParseOut) -> List<&2, Ast.ListItem>:
+  match x:
+    case MdParseOut{blocks, items, loose}:
+      items
+
+def md_parse_out_loose(x: MdParseOut) -> Bool:
+  match x:
+    case MdParseOut{blocks, items, loose}:
+      loose
+
+def md_parse_out_prepend_block(block: Ast.Block, +out: MdParseOut) -> MdParseOut:
+  MdParseOut{block <> md_parse_out_blocks(out), md_parse_out_items(out), md_parse_out_loose(out)}
+
+def md_parse_out_prepend_item(item: Ast.ListItem, +out: MdParseOut) -> MdParseOut:
+  MdParseOut{md_parse_out_blocks(out), item <> md_parse_out_items(out), md_parse_out_loose(out)}
+
+def md_lines_work(+lines: List<&2, MdLine>) -> MdParseWork:
+  MdWorkLines{lines, False{}, False{}, False{}}
+
+# State for the sequence continuation after emitting one direct child block.
+# A pending blank line makes the region loose only when it separates two
+# direct child blocks; leading and trailing blanks do not.
+def md_lines_after_block(
+  +lines: List<&2, MdLine>,
+  +seenblock: Bool,
+  +blankafter: Bool,
+  +loose: Bool
+) -> MdParseWork:
+  +separated = Bool.and(seenblock, blankafter)
+  MdWorkLines{lines, True{}, False{}, loose || separated}
+
 # The fueled block parser.  Every iteration consumes at least one physical
 # line (blank lines included).  Container contents are parsed by a recursive
 # call on the extracted inner lines, and the outer continuation is a sibling
 # recursive call on the unconsumed remainder; both descend on fuel.
-def md_parse_blocks(fuel: Nat, +refs: List<&2, RefDef>, +lines: List<&2, MdLine>) -> List<&2, Ast.Block>:
+def md_parse_work(fuel: Nat, +refs: List<&2, RefDef>, work: MdParseWork) -> MdParseOut:
   match fuel:
     case 0n:
-      md_fallback_lines(lines)
+      match work:
+        case MdWorkLines{lines, seenblock, blankafter, loose}:
+          MdParseOut{md_fallback_lines(lines), Nil{}, loose}
+        case MdWorkItems{items, loose}:
+          MdParseOut{Nil{}, Nil{}, loose}
     case 1n++f:
-      match lines:
-        case Nil{}:
-          Nil{}
-        case line <> rest:
-          +text = md_line_text(line)
-          +start = md_line_start(line)
-          +end = md_line_end(line)
-          +htmlkind = md_html_block_kind(text)
-          ifs(List<&2, Ast.Block>, Text.blank_line(text),
-            u => md_parse_blocks(f, refs, rest),
-            u =>
-              ifs(List<&2, Ast.Block>, Nat.is_ne(htmlkind, 0n),
+      match work:
+        case MdWorkItems{items, +loose}:
+          match items:
+            case Nil{}:
+              MdParseOut{Nil{}, Nil{}, loose}
+            case +item <> restitems:
+              +bodyout = md_parse_work(f, refs, md_lines_work(md_raw_item_lines(item)))
+              +bodyloose = md_parse_out_loose(bodyout)
+              +bodyblocks = md_parse_out_blocks(bodyout)
+              +restout = md_parse_work(f, refs, MdWorkItems{restitems, loose || bodyloose})
+              +span = md_make_span(md_raw_item_start(item), md_raw_item_end(item))
+              itemout : Ast.ListItem = Ast.ListItem{bodyblocks, span}
+              md_parse_out_prepend_item(itemout, restout)
+        case MdWorkLines{lines, +seenblock, +blankafter, +loose}:
+          match lines:
+            case Nil{}:
+              MdParseOut{Nil{}, Nil{}, loose}
+            case +line <> +rest:
+              +text = md_line_text(line)
+              +start = md_line_start(line)
+              +end = md_line_end(line)
+              +htmlkind = md_html_block_kind(text)
+              ifs(MdParseOut, Text.blank_line(text),
+                u => md_parse_work(f, refs, MdWorkLines{rest, seenblock, True{}, loose}),
                 u =>
-                  +grab = md_scan_html_block(line <> rest, htmlkind)
-                  +content = md_join_code_lines(string_lines_grab_lines(grab))
-                  +blockend = string_lines_grab_end(grab)
-                  Ast.BHtmlBlock{content, Ast.Span{start, blockend}} <>
-                    md_parse_blocks(f, refs, string_lines_grab_rest(grab))
-                u =>
-                  ifs(List<&2, Ast.Block>, md_is_fence_start(text),
-                u =>
-                  +marker = md_fence_marker(text)
-                  +flen = md_fence_len(text)
-                  +openindent = md_marker_indent(text)
-                  +grab = md_scan_fenced(rest, marker, flen, openindent, end)
-                  +content = md_join_code_lines(string_lines_grab_lines(grab))
-                  +blockend = string_lines_grab_end(grab)
-                  +info = md_maybe_info(md_fence_info(text))
-                  md_make_code_block(content, info, start, blockend) <>
-                    md_parse_blocks(f, refs, string_lines_grab_rest(grab))
-                u =>
-                  ifs(List<&2, Ast.Block>, md_is_atx(text),
+                  ifs(MdParseOut, Nat.is_ne(htmlkind, 0n),
                     u =>
-                      +content = md_atx_text(text)
-                      +level = md_atx_level(text)
-                      md_make_heading_block(refs, level, content, start, end) <>
-                        md_parse_blocks(f, refs, rest)
+                      +grab = md_scan_html_block(line <> rest, htmlkind)
+                      +content = md_join_code_lines(string_lines_grab_lines(grab))
+                      +blockend = string_lines_grab_end(grab)
+                      +tailout = md_parse_work(f, refs,
+                        md_lines_after_block(string_lines_grab_rest(grab), seenblock, blankafter, loose))
+                      md_parse_out_prepend_block(md_make_html_block(content, start, blockend), tailout)
                     u =>
-                      ifs(List<&2, Ast.Block>, md_is_thematic(text),
-                        u => md_make_thematic_block(start, end) <> md_parse_blocks(f, refs, rest),
+                      ifs(MdParseOut, md_is_fence_start(text),
                         u =>
-                          ifs(List<&2, Ast.Block>, md_is_quote_start(text),
+                          +marker = md_fence_marker(text)
+                          +flen = md_fence_len(text)
+                          +openindent = md_marker_indent(text)
+                          +grab = md_scan_fenced(rest, marker, flen, openindent, end)
+                          +content = md_join_code_lines(string_lines_grab_lines(grab))
+                          +blockend = string_lines_grab_end(grab)
+                          +info = md_maybe_info(md_fence_info(text))
+                          +tailout = md_parse_work(f, refs,
+                            md_lines_after_block(string_lines_grab_rest(grab), seenblock, blankafter, loose))
+                          md_parse_out_prepend_block(md_make_code_block(content, info, start, blockend), tailout)
+                        u =>
+                          ifs(MdParseOut, md_is_atx(text),
                             u =>
-                              +grab = md_scan_quote(line <> rest)
-                              +inner = md_parse_blocks(f, refs, lines_grab_lines(grab))
-                              +outer = md_parse_blocks(f, refs, lines_grab_rest(grab))
-                              +blockend = lines_grab_end(grab)
-                              md_make_quote_block(inner, start, blockend) <> outer
+                              +content = md_atx_text(text)
+                              +level = md_atx_level(text)
+                              +tailout = md_parse_work(f, refs,
+                                md_lines_after_block(rest, seenblock, blankafter, loose))
+                              md_parse_out_prepend_block(md_make_heading_block(refs, level, content, start, end), tailout)
                             u =>
-                              ifs(List<&2, Ast.Block>, md_is_list_item(text),
+                              ifs(MdParseOut, md_is_thematic(text),
                                 u =>
-                                  +ordered = md_is_ordered_item(text)
-                                  +grab = md_scan_list(refs, line <> rest, ordered)
-                                  +startnum = ifs(U32, ordered,
-                                    v => md_ordered_start(text),
-                                    v => 1)
-                                  +blockend = simple_list_grab_end(grab)
-                                  md_make_list_block(ordered, startnum,
-                                    simple_list_grab_items(grab), start, blockend) <>
-                                    md_parse_blocks(f, refs, simple_list_grab_rest(grab))
+                                  +tailout = md_parse_work(f, refs,
+                                    md_lines_after_block(rest, seenblock, blankafter, loose))
+                                  md_parse_out_prepend_block(md_make_thematic_block(start, end), tailout)
                                 u =>
-                                  ifs(List<&2, Ast.Block>, md_is_indented_code_line(text),
+                                  ifs(MdParseOut, md_is_quote_start(text),
                                     u =>
-                                      +grab = md_scan_indented(line <> rest)
-                                      +content = md_join_code_lines(md_trim_trailing_empty_lines(string_lines_grab_lines(grab)))
-                                      +blockend = string_lines_grab_end(grab)
-                                      md_make_code_block(content, None{}, start, blockend) <>
-                                        md_parse_blocks(f, refs, string_lines_grab_rest(grab))
+                                      +grab = md_scan_quote(line <> rest)
+                                      +innerout = md_parse_work(f, refs, md_lines_work(lines_grab_lines(grab)))
+                                      +inner = md_parse_out_blocks(innerout)
+                                      +blockend = lines_grab_end(grab)
+                                      +tailout = md_parse_work(f, refs,
+                                        md_lines_after_block(lines_grab_rest(grab), seenblock, blankafter, loose))
+                                      md_parse_out_prepend_block(md_make_quote_block(inner, start, blockend), tailout)
                                     u =>
-                                      +grab = md_scan_paragraph(rest, line)
-                                      +content = md_paragraph_text(para_grab_lines(grab))
-                                      +blockend = para_grab_end(grab)
-                                      +setext = para_grab_setext(grab)
-                                      +leaf = ifs(Ast.Block, U32.is_zero(setext),
-                                        v => md_make_paragraph_block(refs, content, start, blockend),
-                                        v => md_make_heading_block(refs, setext, content, start, blockend))
-                                      leaf <> md_parse_blocks(f, refs, para_grab_rest(grab))))))))))
+                                      ifs(MdParseOut, md_is_list_item(text),
+                                        u =>
+                                          +minfo = md_scan_list_marker_info(text)
+                                          +ordered = mlmi_ordered(minfo)
+                                          +grab = md_scan_raw_list(line <> rest, ordered)
+                                          +startnum = mlmi_start(minfo)
+                                          +rawitems = md_raw_list_grab_items(grab)
+                                          +rawloose = md_raw_list_grab_loose(grab)
+                                          +itemsout = md_parse_work(f, refs, MdWorkItems{rawitems, rawloose})
+                                          +listitems = md_parse_out_items(itemsout)
+                                          +listloose = md_parse_out_loose(itemsout)
+                                          +blockend = md_raw_list_grab_end(grab)
+                                          +listblock = md_make_list_block(ordered, startnum,
+                                            Bool.not(listloose), listitems, start, blockend)
+                                          +tailout = md_parse_work(f, refs,
+                                            md_lines_after_block(md_raw_list_grab_rest(grab), seenblock, blankafter, loose))
+                                          md_parse_out_prepend_block(listblock, tailout)
+                                        u =>
+                                          ifs(MdParseOut, md_is_indented_code_line(text),
+                                            u =>
+                                              +grab = md_scan_indented(line <> rest)
+                                              +content = md_join_code_lines(md_trim_trailing_empty_lines(string_lines_grab_lines(grab)))
+                                              +blockend = string_lines_grab_end(grab)
+                                              +tailout = md_parse_work(f, refs,
+                                                md_lines_after_block(string_lines_grab_rest(grab), seenblock, blankafter, loose))
+                                              md_parse_out_prepend_block(md_make_code_block(content, None{}, start, blockend), tailout)
+                                            u =>
+                                              +grab = md_scan_paragraph(rest, line)
+                                              +content = md_paragraph_text(para_grab_lines(grab))
+                                              +blockend = para_grab_end(grab)
+                                              +setext = para_grab_setext(grab)
+                                              +leaf = ifs(Ast.Block, U32.is_zero(setext),
+                                                v => md_make_paragraph_block(refs, content, start, blockend),
+                                                v => md_make_heading_block(refs, setext, content, start, blockend))
+                                              +tailout = md_parse_work(f, refs,
+                                                md_lines_after_block(para_grab_rest(grab), seenblock, blankafter, loose))
+                                              md_parse_out_prepend_block(leaf, tailout)))))))))
+
+def md_parse_blocks(fuel: Nat, +refs: List<&2, RefDef>, +lines: List<&2, MdLine>) -> List<&2, Ast.Block>:
+  md_parse_out_blocks(md_parse_work(fuel, refs, md_lines_work(lines)))
 
 # Reference-definition stripping/collection.  This is a document-level
 # lexical prepass over top-level lines.  It deliberately knows about the two
