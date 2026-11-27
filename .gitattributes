@@ -1,0 +1,6 @@
+# Vendored conformance corpora are third-party pinned inputs, not source.
+corpus/** linguist-vendored
+
+# Keep corpus bytes exactly as pinned; never normalize line endings.
+corpus/commonmark/spec-0.31.2.txt -text
+corpus/cooklang/canonical.yaml -text

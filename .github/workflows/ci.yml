@@ -1,0 +1,104 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Least privilege: the pipeline only reads the checkout.
+permissions:
+  contents: read
+
+# Cancel superseded runs on the same ref.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  BEND_NO_TELEMETRY: "1"
+
+jobs:
+  verify-core:
+    name: verify-core
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Cache Bend toolchain
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.bend
+          key: bend-2.0.40-${{ runner.os }}-${{ runner.arch }}
+
+      - name: Install Bend 2.0.40 (pinned sha256)
+        run: sh tools/install_bend_ci.sh
+
+      - name: Core verification suite
+        run: sh tools/verify.sh core
+
+  native-conformance:
+    name: native-conformance
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Cache Bend toolchain
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.bend
+          key: bend-2.0.40-${{ runner.os }}-${{ runner.arch }}
+
+      - name: Install Bend 2.0.40 (pinned sha256)
+        run: sh tools/install_bend_ci.sh
+
+      - name: Build single-document CLI
+        run: ~/.bend/bin/bend src/main.bend -o /tmp/bendown-bin
+
+      - name: Build batch CLI
+        run: ~/.bend/bin/bend src/batch_cli.bend -o /tmp/bendown-batch
+
+      - name: CommonMark corpus ratchet (floor 501/652)
+        run: |
+          python3 tools/differential.py commonmark \
+            --cmd /tmp/bendown-bin --timeout 10 --failures 0 \
+            > /tmp/commonmark.json || true
+          python3 - <<'PYEOF'
+          import json
+          x = json.load(open('/tmp/commonmark.json'))
+          print(f"CommonMark: {x['passed']}/{x['total']}")
+          for k, v in x['sections'].items():
+              if v['passed'] != v['total']:
+                  print(f"  {k}: {v['passed']}/{v['total']}")
+          floor = 501
+          if x['passed'] < floor:
+              raise SystemExit(
+                  f"REGRESSION: {x['passed']}/{x['total']} is below the ratchet floor {floor}")
+          if x.get('errors'):
+              raise SystemExit(f"runner errors: {x['errors']}")
+          PYEOF
+
+      - name: Cooklang fixedpoint ratchet (floor 60/60)
+        run: |
+          python3 tools/differential.py cooklang --operation fixedpoint \
+            --cmd '/tmp/bendown-bin serialize --from cooklang' \
+            --timeout 10 --failures 0 > /tmp/cooklang-fixedpoint.json || true
+          python3 - <<'PYEOF'
+          import json
+          x = json.load(open('/tmp/cooklang-fixedpoint.json'))
+          print(f"Cooklang fixedpoint: {x['passed']}/{x['total']}")
+          if x['passed'] != x['total']:
+              raise SystemExit(
+                  f"REGRESSION: {x['passed']}/{x['total']}, expected {x['total']}/{x['total']}")
+          PYEOF
+
+      - name: Batch CLI smoke
+        run: |
+          d=$(mktemp -d)
+          printf '# Alpha\n\nSee [beta](beta.md).\n' > "$d/a.md"
+          printf 'Add @flour{1/2%%cup}.\n' > "$d/c.cook"
+          /tmp/bendown-batch "$d" | tee /tmp/batch-out.txt
+          grep -q 'a.md -> beta.md' /tmp/batch-out.txt
+          grep -q '<article class="recipe">' /tmp/batch-out.txt
+          echo "batch smoke ok"
