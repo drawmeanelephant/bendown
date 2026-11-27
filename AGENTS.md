@@ -26,6 +26,7 @@ Important Bend constraints discovered while bootstrapping:
 - Affine values cannot be used twice. Mark reusable `Data` parameters with `+`.
 - Rewriting `%e : P` replaces the right-hand side of an equality proof with its left-hand side. Use `Equal.sym` when the needed orientation is opposite.
 - Strings are linked lists of Unicode characters, not byte arrays. `src/text.bend` has `utf8_length` for byte-ceiling checks over valid UTF-8 text.
+- If typechecking fails with `cannot infer` at a `Data` constructor or list cons inside a complex expression, route construction through tiny explicitly typed factory/cons helpers whose constructor arguments are simple parameters. Type ascription at the outer expression is often insufficient once Bend inlines the expression.
 
 Cleanroom boundary: implement behavior from official specifications, Oliver's `docs/`, and test corpora. Do not inspect or copy parser implementation source from Oliver (`src/markdown.zig`, `src/textile.zig`, `src/cooklang*.zig`) or any third-party markup parser.
 
