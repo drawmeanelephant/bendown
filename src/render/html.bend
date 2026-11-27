@@ -360,6 +360,7 @@ def render_tight_single_paragraph(attrs: List<&2, Ast.Attr>, children: List<&2, 
 type BlockWork is Data:
   WorkBlock{block: Ast.Block, tight_para: Bool}
   WorkBlocks{blocks: List<&2, Ast.Block>, tight_para: Bool}
+  WorkTightItemBlocks{blocks: List<&2, Ast.Block>, first: Bool}
   WorkItems{items: List<&2, Ast.ListItem>, tight: Bool}
 
 def render_block_work(+fuel: Nat, +profile: HtmlProfile, work: BlockWork) -> String:
@@ -400,23 +401,38 @@ def render_block_work(+fuel: Nat, +profile: HtmlProfile, work: BlockWork) -> Str
             case h <> t:
               render_block_work(f, profile, WorkBlock{h, tight_para}) ++
                 render_block_work(f, profile, WorkBlocks{t, tight_para})
+        case WorkTightItemBlocks{blocks, +first}:
+          match blocks:
+            case Nil{}:
+              ""
+            case Ast.BParagraph{children, attrs, span} <> restblocks:
+              match restblocks:
+                case Nil{}:
+                  render_tight_single_paragraph(attrs, children, profile)
+                case more:
+                  render_paragraph_tight(attrs, children, profile) ++
+                    render_block_work(f, profile, WorkTightItemBlocks{more, False{}})
+            case h <> restblocks:
+              +rendered = render_block_work(f, profile, WorkBlock{h, True{}})
+              +prefix = Bool.pick(String, first, "\n", "")
+              prefix ++ rendered ++
+                render_block_work(f, profile, WorkTightItemBlocks{restblocks, False{}})
         case WorkItems{items, +tight}:
           match items:
             case Nil{}:
               ""
             case Ast.ListItem{blocks, span} <> t:
               match blocks:
-                case Ast.BParagraph{children, attrs, span} <> Nil{}:
+                case Nil{}:
+                  "<li></li>\n" ++ render_block_work(f, profile, WorkItems{t, tight})
+                case u:
                   match tight:
                     case True{}:
-                      "<li>" ++ render_tight_single_paragraph(attrs, children, profile) ++ "</li>\n" ++
-                        render_block_work(f, profile, WorkItems{t, tight})
+                      "<li>" ++ render_block_work(f, profile, WorkTightItemBlocks{u, True{}}) ++
+                        "</li>\n" ++ render_block_work(f, profile, WorkItems{t, tight})
                     case False{}:
-                      "<li>\n" ++ render_paragraph_block(children, attrs, profile, False{}) ++ "</li>\n" ++
-                        render_block_work(f, profile, WorkItems{t, tight})
-                case u:
-                  "<li>\n" ++ render_block_work(f, profile, WorkBlocks{u, tight}) ++ "</li>\n" ++
-                    render_block_work(f, profile, WorkItems{t, tight})
+                      "<li>\n" ++ render_block_work(f, profile, WorkBlocks{u, False{}}) ++
+                        "</li>\n" ++ render_block_work(f, profile, WorkItems{t, tight})
 
 def render_block_budget() -> Nat:
   4294967295n

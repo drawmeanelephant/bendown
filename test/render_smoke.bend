@@ -114,7 +114,7 @@ def main() -> IO(Unit):
         "<hr />\n" ++
         "<pre id=\"code\"><code class=\"language-c++\">if (a &lt; b) {\n  c &amp;= &quot;d&quot;;\n}\n</code></pre>\n" ++
         "<blockquote cite=\"https://q/?a=1&amp;b=2\">\n<p>quote</p>\n</blockquote>\n" ++
-        "<ul>\n<li>one</li>\n<li>\ntwo\n<ol start=\"3\">\n<li>\n<p>nested</p>\n</li>\n</ol>\n</li>\n</ul>\n" ++
+        "<ul>\n<li>one</li>\n<li>two\n<ol start=\"3\">\n<li>\n<p>nested</p>\n</li>\n</ol>\n</li>\n</ul>\n" ++
         "<table>\n<tr><th align=\"left\">H&amp;</th></tr>\n<tr class=\"body\"><td data-k=\"v\" align=\"right\" colspan=\"2\" rowspan=\"3\">V&lt;</td><td align=\"right\">Z</td></tr>\n</table>\n")
 
     check("html-verbatim",
