@@ -1,6 +1,6 @@
 import Base
-import ../ast.bend as Ast
 import ../text.bend as Text
+import ../document_links.bend as DocumentLinks
 import ../parser/markdown.bend as Markdown
 import ../parser/textile.bend as Textile
 import ../render/html.bend as Html
@@ -150,116 +150,8 @@ def batch_render_par(xs: List<&2, String>) -> List<&2, String>:
 def batch_render_seq(xs: List<&2, String>) -> List<&2, String>:
   Batch.seq_map(~String, ~String, ~render_one, xs)
 
-# ---------------------------------------------------------------------------
-# Pure core: link target extraction
-# ---------------------------------------------------------------------------
-
-# Explicit work queue for extraction.  Bend does not admit mutual recursion,
-# so blocks, items, rows, cells and inlines are all handled inside one fueled
-# dispatcher, the same pattern the HTML renderer uses.  The fuel is generous;
-# exhaustion conservatively yields no targets for the unvisited remainder.
-type LinkWork is Data:
-  LwInline{one: Ast.Inline}
-  LwInlines{xs: List<&2, Ast.Inline>}
-  LwBlock{one: Ast.Block}
-  LwBlocks{xs: List<&2, Ast.Block>}
-  LwItems{xs: List<&2, Ast.ListItem>}
-  LwRows{xs: List<&2, Ast.TableRow>}
-  LwCells{xs: List<&2, Ast.TableCell>}
-
 def link_cat(xs: List<&2, String>, ys: List<&2, String>) -> List<&2, String>:
   List.append(&2, String, xs, ys)
-
-def link_targets_work(+fuel: Nat, work: LinkWork) -> List<&2, String>:
-  match fuel:
-    case 0n:
-      Nil{}
-    case 1n++f:
-      match work:
-        case LwInlines{xs}:
-          match xs:
-            case Nil{}:
-              Nil{}
-            case h <> t:
-              link_cat(link_targets_work(f, LwInline{h}), link_targets_work(f, LwInlines{t}))
-        case LwInline{one}:
-          match one:
-            case Ast.ILink{children, href, title, span}:
-              href <> link_targets_work(f, LwInlines{children})
-            case Ast.IImage{src, alt, title, span}:
-              src <> Nil{}
-            case Ast.IAutolink{href, label, span}:
-              href <> Nil{}
-            case Ast.IEmph{children, span}:
-              link_targets_work(f, LwInlines{children})
-            case Ast.IStrong{children, span}:
-              link_targets_work(f, LwInlines{children})
-            case Ast.IBold{children, span}:
-              link_targets_work(f, LwInlines{children})
-            case Ast.IItalic{children, span}:
-              link_targets_work(f, LwInlines{children})
-            case Ast.IDeleted{children, span}:
-              link_targets_work(f, LwInlines{children})
-            case Ast.IInserted{children, span}:
-              link_targets_work(f, LwInlines{children})
-            case Ast.ISuperscript{children, span}:
-              link_targets_work(f, LwInlines{children})
-            case Ast.ISubscript{children, span}:
-              link_targets_work(f, LwInlines{children})
-            case Ast.ISpan{children, attrs, span}:
-              link_targets_work(f, LwInlines{children})
-            case u:
-              Nil{}
-        case LwBlocks{xs}:
-          match xs:
-            case Nil{}:
-              Nil{}
-            case h <> t:
-              link_cat(link_targets_work(f, LwBlock{h}), link_targets_work(f, LwBlocks{t}))
-        case LwBlock{one}:
-          match one:
-            case Ast.BParagraph{children, attrs, span}:
-              link_targets_work(f, LwInlines{children})
-            case Ast.BHeading{level, children, attrs, span}:
-              link_targets_work(f, LwInlines{children})
-            case Ast.BBlockQuote{blocks, attrs, cite, span}:
-              link_targets_work(f, LwBlocks{blocks})
-            case Ast.BList{ordered, start, tight, items, span}:
-              link_targets_work(f, LwItems{items})
-            case Ast.BTable{alignments, rows, span}:
-              link_targets_work(f, LwRows{rows})
-            case u:
-              Nil{}
-        case LwItems{xs}:
-          match xs:
-            case Nil{}:
-              Nil{}
-            case Ast.ListItem{blocks, ispan} <> t:
-              link_cat(link_targets_work(f, LwBlocks{blocks}), link_targets_work(f, LwItems{t}))
-        case LwRows{xs}:
-          match xs:
-            case Nil{}:
-              Nil{}
-            case Ast.TableRow{cells, attrs, span} <> t:
-              link_cat(link_targets_work(f, LwCells{cells}), link_targets_work(f, LwRows{t}))
-        case LwCells{xs}:
-          match xs:
-            case Nil{}:
-              Nil{}
-            case Ast.TableCell{header, align, colspan, rowspan, children, attrs, span} <> t:
-              link_cat(link_targets_work(f, LwInlines{children}), link_targets_work(f, LwCells{t}))
-
-def link_work_fuel() -> Nat:
-  4294967295n
-
-# Every link target of a document, in document order.  Link hrefs, autolink
-# hrefs and image sources all count as outbound references.  A link emits its
-# own href before the targets of its children (pre-order); the children of a
-# markdown link are text in practice, so this rarely matters.
-def document_link_targets(doc: Ast.Document) -> List<&2, String>:
-  match doc:
-    case Ast.Document{blocks}:
-      link_targets_work(link_work_fuel(), LwBlocks{blocks})
 
 # Cooklang recipe references are outbound references for the batch graph.
 def cook_part_targets(part: CookModel.CookPart) -> List<&2, String>:
@@ -321,11 +213,11 @@ def format_of_path(+path: String) -> DocFormat:
 
 def process_markdown_doc(+name: String, +source: String) -> DocOutput:
   +doc = Markdown.parse_markdown(source)
-  DocOutput{name, Html.render_document(doc), document_link_targets(doc)}
+  DocOutput{name, Html.render_document(doc), DocumentLinks.document_link_targets(doc)}
 
 def process_textile_doc(+name: String, +source: String) -> DocOutput:
   +doc = Textile.parse_textile(source)
-  DocOutput{name, Html.render_document(doc), document_link_targets(doc)}
+  DocOutput{name, Html.render_document(doc), DocumentLinks.document_link_targets(doc)}
 
 def process_cook_doc(+name: String, +source: String) -> DocOutput:
   +recipe = CookParser.parse_cooklang(source)
