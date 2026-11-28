@@ -86,13 +86,13 @@ def show_inlines(xs: List<&2, Ast.Inline>) -> String:
       "Sub[" ++ show_inlines(children) ++ "]" ++ show_span(span) ++ ";" ++ show_inlines(rest)
     case Ast.ISpan{children, attrs, span} <> rest:
       "Span[" ++ show_inlines(children) ++ "]{" ++ show_attrs(attrs) ++ "}" ++ show_span(span) ++ ";" ++ show_inlines(rest)
-    case Ast.ILink{children, href, title, span} <> rest:
+    case Ast.ILink{children, href, title, span, destination} <> rest:
       "L[" ++ show_inlines(children) ++ "](" ++ q(href) ++ "," ++
         show_maybe_string(title) ++ ")" ++ show_span(span) ++ ";" ++ show_inlines(rest)
-    case Ast.IImage{src, alt, title, span} <> rest:
+    case Ast.IImage{src, alt, title, span, destination} <> rest:
       "Img(" ++ q(src) ++ "," ++ q(alt) ++ "," ++ show_maybe_string(title) ++ ")" ++
         show_span(span) ++ ";" ++ show_inlines(rest)
-    case Ast.IAutolink{href, label, span} <> rest:
+    case Ast.IAutolink{href, label, span, destination} <> rest:
       "A(" ++ q(href) ++ "," ++ q(label) ++ ")" ++ show_span(span) ++ ";" ++ show_inlines(rest)
     case Ast.IRawHtml{text, span} <> rest:
       "Raw" ++ q(text) ++ show_span(span) ++ ";" ++ show_inlines(rest)

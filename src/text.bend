@@ -24,12 +24,15 @@ def utf8_width.low(+c: Char, small: Bool) -> Nat:
 def utf8_width(+c: Char) -> Nat:
   utf8_width.low(c, U32.is_lt(Char.to_u32(c), 128))
 
-def utf8_length(s: String) -> Nat:
+def utf8_length_go(s: String, +acc: Nat) -> Nat:
   match s:
     case SNil{}:
-      0n
-    case SCon{h, t}:
-      Nat.add(utf8_width(h), utf8_length(t))
+      acc
+    case SCon{+h, +t}:
+      utf8_length_go(t, Nat.add(acc, utf8_width(h)))
+
+def utf8_length(s: String) -> Nat:
+  utf8_length_go(s, 0n)
 
 def char_string(c: Char) -> String:
   SCon{c, SNil{}}
@@ -37,16 +40,19 @@ def char_string(c: Char) -> String:
 def string_has_char(s: String, +c: Char) -> Bool:
   String.contains(s, char_string(c))
 
-def normalize_newlines(s: String) -> String:
+def normalize_newlines_go(s: String, +acc: String) -> String:
   match s:
     case SNil{}:
-      SNil{}
+      String.reverse(acc)
     case SCon{'\r', SCon{'\n', t}}:
-      SCon{'\n', normalize_newlines(t)}
+      normalize_newlines_go(t, SCon{'\n', acc})
     case SCon{'\r', t}:
-      SCon{'\n', normalize_newlines(t)}
-    case SCon{h, t}:
-      SCon{h, normalize_newlines(t)}
+      normalize_newlines_go(t, SCon{'\n', acc})
+    case SCon{+h, +t}:
+      normalize_newlines_go(t, SCon{h, acc})
+
+def normalize_newlines(s: String) -> String:
+  normalize_newlines_go(s, SNil{})
 
 def ascii_punctuation(+c: Char) -> Bool:
   Bool.or(Bool.and(U32.is_ge(Char.to_u32(c), 33), U32.is_le(Char.to_u32(c), 47)),
@@ -95,8 +101,17 @@ def spaces_prefix(s: String, acc: Nat) -> Nat:
 def strip_n_chars(s: String, n: Nat) -> String:
   String.drop(s, n)
 
-def take_n_chars(s: String, n: Nat) -> String:
-  String.take(s, n)
+def take_n_chars_go(s: String, n: Nat, +acc: String) -> String:
+  match s n:
+    case SNil{} _:
+      String.reverse(acc)
+    case _ 0n:
+      String.reverse(acc)
+    case SCon{+h, +t} 1n++p:
+      take_n_chars_go(t, p, SCon{h, acc})
+
+def take_n_chars(+s: String, +n: Nat) -> String:
+  take_n_chars_go(s, n, SNil{})
 
 def concat3(a: String, b: String, c: String) -> String:
   a ++ (b ++ c)

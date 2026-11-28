@@ -595,7 +595,7 @@ def tx_parse_inlines(fuel: Nat, +s: String, +pos: U32, +boundary: Bool) -> List<
                               +endpos = tx_pos_add(pos, used)
                               +labelpos = tx_pos_add(pos, 1n)
                               Ast.ILink{Ast.IText{display, tx_span_text(labelpos, display)} <> Nil{},
-                                href, title, Ast.Span{pos, endpos}} <>
+                                href, title, Ast.Span{pos, endpos}, None{}} <>
                                 tx_parse_inlines(f, rest, endpos, False{})),
                         v => Ast.IText{"\"", tx_span_text(pos, "\"")} <>
                           tx_parse_inlines(f, t, tx_pos_add_text(pos, "\""), True{})),
@@ -628,13 +628,13 @@ def tx_parse_inlines(fuel: Nat, +s: String, +pos: U32, +boundary: Bool) -> List<
                           +endpos = tx_pos_add(pos, used)
                           +image_used = Nat.sub(Text.utf8_length(s), Text.utf8_length(after_close))
                           +image_endpos = tx_pos_add(pos, image_used)
-                          Ast.ILink{Ast.IImage{src, alt, title, Ast.Span{pos, image_endpos}} <> Nil{},
-                            href, None{}, Ast.Span{pos, endpos}} <>
+                          Ast.ILink{Ast.IImage{src, alt, title, Ast.Span{pos, image_endpos}, None{}} <> Nil{},
+                            href, None{}, Ast.Span{pos, endpos}, None{}} <>
                             tx_parse_inlines(f, rest, endpos, False{}),
                         v =>
                           +used = Nat.sub(Text.utf8_length(s), Text.utf8_length(after_close))
                           +endpos = tx_pos_add(pos, used)
-                          Ast.IImage{src, alt, title, Ast.Span{pos, endpos}} <>
+                          Ast.IImage{src, alt, title, Ast.Span{pos, endpos}, None{}} <>
                             tx_parse_inlines(f, after_close, endpos, True{}))),
                 u => Ast.IText{"!", tx_span_text(pos, "!")} <>
                   tx_parse_inlines(f, t, tx_pos_add_text(pos, "!"), True{})),

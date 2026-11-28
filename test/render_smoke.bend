@@ -39,7 +39,7 @@ def main() -> IO(Unit):
           Ast.ISuperscript{[Ast.IText{"sup", Ast.span_empty()}], Ast.span_empty()},
           Ast.ISubscript{[Ast.IText{"sub", Ast.span_empty()}], Ast.span_empty()},
           Ast.ISpan{[Ast.IText{"span", Ast.span_empty()}], [Ast.Attr{"class", "spc"}, Ast.Attr{"id", "sp"}], Ast.span_empty()},
-          Ast.IAutolink{"https://a/?x=1&y=2", "A&", Ast.span_empty()}
+          Ast.IAutolink{"https://a/?x=1&y=2", "A&", Ast.span_empty(), None{}}
         ], [], Ast.span_empty()}
       ]}),
       "<p><b>b</b><i>i</i><del>d</del><ins>in</ins><sup>sup</sup><sub>sub</sub><span class=\"spc\" id=\"sp\">span</span><a href=\"https://a/?x=1&amp;y=2\">A&amp;</a></p>\n")
@@ -74,9 +74,9 @@ def main() -> IO(Unit):
           Ast.IText{" ", Ast.span_empty()},
           Ast.ICode{"a<b", Ast.span_empty()},
           Ast.IText{" ", Ast.span_empty()},
-          Ast.ILink{[Ast.IText{"link", Ast.span_empty()}], "https://x/?a=1&b=2", Some{"ti\"tle"}, Ast.span_empty()},
+          Ast.ILink{[Ast.IText{"link", Ast.span_empty()}], "https://x/?a=1&b=2", Some{"ti\"tle"}, Ast.span_empty(), None{}},
           Ast.IText{" ", Ast.span_empty()},
-          Ast.IImage{"im&g.png", "a\"b", None{}, Ast.span_empty()},
+          Ast.IImage{"im&g.png", "a\"b", None{}, Ast.span_empty(), None{}},
           Ast.ISoftBreak{Ast.span_empty()},
           Ast.IText{"after", Ast.span_empty()},
           Ast.IHardBreak{Ast.span_empty()},
@@ -129,7 +129,7 @@ def main() -> IO(Unit):
         Ast.BThematicBreak{Ast.span_empty()},
         Ast.BHtmlBlock{"<div x=\"1\">raw</div>\n\n", Ast.span_empty()},
         Ast.BParagraph{[
-          Ast.IImage{"im.png", "alt", None{}, Ast.span_empty()},
+          Ast.IImage{"im.png", "alt", None{}, Ast.span_empty(), None{}},
           Ast.IHardBreak{Ast.span_empty()},
           Ast.IText{"x", Ast.span_empty()}
         ], [], Ast.span_empty()}

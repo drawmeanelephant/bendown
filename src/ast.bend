@@ -1,7 +1,52 @@
 import Base
 
+# A half-open interval `[start, end)` of UTF-8 byte offsets.  These are not
+# character indexes, line/column pairs, or necessarily original-file offsets:
+# each producer defines the coordinate space.  Markdown spans are offsets in
+# the newline-normalized source (CRLF and CR become LF). Reference definitions are
+# extracted during the block phase without removing or rewriting source bytes.
+# Use `source_map.bend` with the original input to translate Markdown spans
+# back to original-file byte offsets.  Markdown inline link and destination
+# spans are exact in that coordinate space for supported parses.  Container
+# block spans can describe the stripped content region rather than the full
+# marker-inclusive source extent, and fuel-exhausted fallback positions remain
+# approximate.
 type Span is Data:
   Span{start: U32, end: U32}
+
+# Markdown destination provenance.  `raw` is the exact author-written
+# destination spelling, including the angle brackets when the angle destination
+# form was used.  For an autolink, `raw` is the label inside the autolink
+# brackets.  `logical` is the destination after Markdown backslash/entity
+# decoding (plus `mailto:` completion for email autolinks) but before URI
+# percent-encoding; percent-encoded input is never percent-decoded here.
+# `span` addresses `raw` in the Markdown parser coordinate space.  For a link
+# whose destination came from a reference definition, `definition_span` is the
+# whole definition and `span` is the destination inside that definition;
+# otherwise `definition_span` is absent and `span` is at the use site.
+type LinkDestination is Data:
+  LinkDestination{raw: String, logical: String, span: Span,
+    definition_span: Maybe<&2, Span>}
+
+def link_destination_raw(x: LinkDestination) -> String:
+  match x:
+    case LinkDestination{raw, logical, span, definition_span}:
+      raw
+
+def link_destination_logical(x: LinkDestination) -> String:
+  match x:
+    case LinkDestination{raw, logical, span, definition_span}:
+      logical
+
+def link_destination_span(x: LinkDestination) -> Span:
+  match x:
+    case LinkDestination{raw, logical, span, definition_span}:
+      span
+
+def link_destination_definition_span(x: LinkDestination) -> Maybe<&2, Span>:
+  match x:
+    case LinkDestination{raw, logical, span, definition_span}:
+      definition_span
 
 type Attr is Data:
   Attr{key: String, value: String}
@@ -24,9 +69,11 @@ type Inline is Data:
   ISuperscript{children: List<&2, Inline>, span: Span}
   ISubscript{children: List<&2, Inline>, span: Span}
   ISpan{children: List<&2, Inline>, attrs: List<&2, Attr>, span: Span}
-  ILink{children: List<&2, Inline>, href: String, title: Maybe<&2, String>, span: Span}
-  IImage{src: String, alt: String, title: Maybe<&2, String>, span: Span}
-  IAutolink{href: String, label: String, span: Span}
+  ILink{children: List<&2, Inline>, href: String, title: Maybe<&2, String>, span: Span,
+    destination: Maybe<&2, LinkDestination>}
+  IImage{src: String, alt: String, title: Maybe<&2, String>, span: Span,
+    destination: Maybe<&2, LinkDestination>}
+  IAutolink{href: String, label: String, span: Span, destination: Maybe<&2, LinkDestination>}
   IRawHtml{text: String, span: Span}
   ISoftBreak{span: Span}
   IHardBreak{span: Span}
