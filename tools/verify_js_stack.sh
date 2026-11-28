@@ -8,7 +8,8 @@ OUT=${BENDOWN_JS_STACK_OUT:-/tmp/bendown-js-stack-repro.mjs}
 cd "$ROOT"
 export BEND_NO_TELEMETRY=1
 
-if ! command -v node >/dev/null 2>&1; then
+NODE=${BENDOWN_NODE:-node}
+if ! command -v "$NODE" >/dev/null 2>&1; then
   echo "node not found; JavaScript stack regression skipped" >&2
   exit 1
 fi
@@ -90,4 +91,4 @@ for (const [name, input] of [
 console.log(`javascript stack regression passed (${count} cases)`);
 NODEEOF
 
-BENDOWN_JS_STACK_OUT="$OUT" node "$CHECK"
+BENDOWN_JS_STACK_OUT="$OUT" "$NODE" "$CHECK"
