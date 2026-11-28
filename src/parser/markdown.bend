@@ -2745,6 +2745,13 @@ def md_inline_source_single(+text: String, +start: U32) -> MdInlineSource:
   +segment = md_inline_segment_mk(start, start)
   MdInlineSource{text, start, segment <> Nil{}}
 
+def md_lines_is_empty(xs: List<&2, MdLine>) -> Bool:
+  match xs:
+    case Nil{}:
+      True{}
+    case h <> t:
+      False{}
+
 # Reconstruct the relationship between the flattened paragraph text seen by
 # the inline scanner and normalized-source byte positions.  Container and
 # indentation prefixes are not part of the paragraph text, but their widths are
@@ -2760,7 +2767,7 @@ def md_paragraph_segments_go(xs: List<&2, MdLine>, +assumed: U32,
       +lead = md_hspace_prefix(text, 0n)
       +trimmed = md_trim_start(text)
       +fullen = Text.utf8_length(trimmed)
-      +last = Nat.is_eq(List.length(&2, MdLine, rest), 0n)
+      +last = md_lines_is_empty(rest)
       +trail = ifs(Nat, last,
         u => md_hspace_suffix_count(trimmed),
         u => 0n)
