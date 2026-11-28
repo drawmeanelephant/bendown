@@ -57,6 +57,9 @@ function denseImageAlt(units) {
 function longLinkTitleLines(lines) {
   return '[x](u "' + 'a\n'.repeat(lines) + '")\n';
 }
+function flatLinks(n) {
+  return '[x](u)'.repeat(n) + '\n';
+}
 let count = 0;
 for (const [name, make] of [['heading', heading], ['short-lines', shortLines], ['sections', sections], ['mixed', mixed]]) {
   for (const n of [1024, 4096, 8192, 24000]) {
@@ -86,6 +89,20 @@ for (const [name, input] of [
     throw new Error(`${name}: ${error && error.message}`);
   }
   if (!value) throw new Error(`${name}: parser returned false`);
+  count += 1;
+}
+for (const [name, input, expected] of [
+  ['flat-document-links/5000', flatLinks(5000), 5000],
+]) {
+  let value;
+  try {
+    value = mod.default.document_links_stack_probe(input);
+  } catch (error) {
+    throw new Error(`${name}: ${error && error.message}`);
+  }
+  if (value.links !== expected || value.targets !== expected) {
+    throw new Error(`${name}: expected ${expected} links/targets, got ${value.links}/${value.targets}`);
+  }
   count += 1;
 }
 console.log(`javascript stack regression passed (${count} cases)`);

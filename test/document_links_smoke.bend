@@ -59,6 +59,9 @@ def markdown_nested() -> String:
 def markdown_nested_link_label() -> String:
   "[![alt](img.png)](outer.md)\n"
 
+def markdown_nested_continuation_order() -> String:
+  "[a](a.md) *em [b](b.md)* [c](c.md)\n\n> quote [q](q.md)\n\n- item [i](i.md)\n- item [j](j.md)\n"
+
 def no_inlines() -> List<&2, Ast.Inline>:
   {[] : List<&2, Ast.Inline>}
 
@@ -145,4 +148,7 @@ def main() -> IO(Unit):
     Unit <- expect_equal("target-projection-order",
       "\"head.md\";\"a.md\";\"https://example.com\";\"img.png\";\"em.md\";\"q.md\";\"i.md\";",
       show_strs(DocumentLinks.document_link_targets(Markdown.parse_markdown(markdown_nested()))))
+    Unit <- expect_equal("nested-continuation-target-order",
+      "\"a.md\";\"b.md\";\"c.md\";\"q.md\";\"i.md\";\"j.md\";",
+      show_strs(DocumentLinks.document_link_targets(Markdown.parse_markdown(markdown_nested_continuation_order()))))
     IO.print("document links smoke: all checks passed")
