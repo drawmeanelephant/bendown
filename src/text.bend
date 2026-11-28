@@ -101,8 +101,17 @@ def spaces_prefix(s: String, acc: Nat) -> Nat:
 def strip_n_chars(s: String, n: Nat) -> String:
   String.drop(s, n)
 
-def take_n_chars(s: String, n: Nat) -> String:
-  String.take(s, n)
+def take_n_chars_go(s: String, n: Nat, +acc: String) -> String:
+  match s n:
+    case SNil{} _:
+      String.reverse(acc)
+    case _ 0n:
+      String.reverse(acc)
+    case SCon{+h, +t} 1n++p:
+      take_n_chars_go(t, p, SCon{h, acc})
+
+def take_n_chars(+s: String, +n: Nat) -> String:
+  take_n_chars_go(s, n, SNil{})
 
 def concat3(a: String, b: String, c: String) -> String:
   a ++ (b ++ c)

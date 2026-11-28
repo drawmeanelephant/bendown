@@ -124,6 +124,86 @@ def word_split_rest(x: WordSplit) -> String:
     case WordSplit{word, rest}:
       rest
 
+def md_list_length_go(a, -A: Kind(a), xs: List<a, A>, +acc: Nat) -> Nat:
+  match xs:
+    case Nil{}:
+      acc
+    case h <> t:
+      md_list_length_go(a, A, t, 1n+acc)
+
+def md_list_length(a, -A: Kind(a), xs: List<a, A>) -> Nat:
+  md_list_length_go(a, A, xs, 0n)
+
+def md_list_rev_onto(a, -A: Kind(a), xs: List<a, A>, ys: List<a, A>) -> List<a, A>:
+  match xs:
+    case Nil{}:
+      ys
+    case h <> t:
+      md_list_rev_onto(a, A, t, h <> ys)
+
+def md_list_append(a, -A: Kind(a), xs: List<a, A>, ys: List<a, A>) -> List<a, A>:
+  md_list_rev_onto(a, A, List.reverse(a, A, xs), ys)
+
+def md_list_take_go(a, -A: Kind(a), xs: List<a, A>, n: Nat, acc: List<a, A>) -> List<a, A>:
+  match xs n:
+    case Nil{} _:
+      List.reverse(a, A, acc)
+    case _ 0n:
+      List.reverse(a, A, acc)
+    case h <> t 1n++p:
+      md_list_take_go(a, A, t, p, h <> acc)
+
+def md_list_take(a, -A: Kind(a), xs: List<a, A>, n: Nat) -> List<a, A>:
+  md_list_take_go(a, A, xs, n, Nil{})
+
+def md_list_drop(a, -A: Kind(a), xs: List<a, A>, n: Nat) -> List<a, A>:
+  match xs n:
+    case u 0n:
+      u
+    case Nil{} _:
+      Nil{}
+    case h <> t 1n++p:
+      md_list_drop(a, A, t, p)
+
+def md_list_set_go(a, -A: Kind(a), xs: List<a, A>, n: Nat, new: A, acc: List<a, A>) -> List<a, A>:
+  match xs n:
+    case Nil{} _:
+      List.reverse(a, A, acc)
+    case h <> t 0n:
+      md_list_append(a, A, List.reverse(a, A, acc), new <> t)
+    case h <> t 1n++p:
+      md_list_set_go(a, A, t, p, new, h <> acc)
+
+def md_list_set(a, -A: Kind(a), xs: List<a, A>, n: Nat, new: A) -> List<a, A>:
+  md_list_set_go(a, A, xs, n, new, Nil{})
+
+def md_string_concat_go(xs: List<&2, String>, +acc: String) -> String:
+  match xs:
+    case Nil{}:
+      acc
+    case h <> t:
+      md_string_concat_go(t, h ++ acc)
+
+def md_string_concat(+xs: List<&2, String>) -> String:
+  md_string_concat_go(List.reverse(&2, String, xs), SNil{})
+
+def md_join_strings_rev_go(xs: List<&2, String>, +sep: String, +acc: String) -> String:
+  match xs:
+    case Nil{}:
+      acc
+    case h <> t:
+      md_join_strings_rev_go(t, sep, h ++ sep ++ acc)
+
+def md_join_strings_rev(xs: List<&2, String>, +sep: String) -> String:
+  match xs:
+    case Nil{}:
+      SNil{}
+    case h <> t:
+      md_join_strings_rev_go(t, sep, h)
+
+def md_join_strings(+xs: List<&2, String>, +sep: String) -> String:
+  md_join_strings_rev(List.reverse(&2, String, xs), sep)
+
 # String utilities.
 def md_str_at(s: String, n: Nat) -> U32:
   match s n:
@@ -137,8 +217,15 @@ def md_str_at(s: String, n: Nat) -> U32:
 def md_char_string(+c: Char) -> String:
   SCon{c, SNil{}}
 
+def md_repeat_char_go(+c: Char, n: Nat, +acc: String) -> String:
+  match n:
+    case 0n:
+      acc
+    case 1n++p:
+      md_repeat_char_go(c, p, SCon{c, acc})
+
 def md_repeat_char(+c: Char, n: Nat) -> String:
-  String.repeat(md_char_string(c), n)
+  md_repeat_char_go(c, n, SNil{})
 
 def md_count_prefix(s: String, +c: Char, +acc: Nat) -> Nat:
   match s:
@@ -354,27 +441,28 @@ def md_scan_entity_after_amp(+s: String) -> Maybe<&2, EntityHit>:
 # Decode backslash escapes and entity/numeric references in contexts such as
 # link destinations, titles, labels, and fence info strings.  The result is
 # not reparsed as Markdown structure.
-def md_decode_ee_go(fuel: Nat, +s: String) -> String:
+def md_decode_ee_go(fuel: Nat, +s: String, +acc: String) -> String:
   match fuel:
     case 0n:
       s
     case 1n++f:
       match s:
         case SNil{}:
-          SNil{}
+          String.reverse(acc)
         case SCon{'\\', SCon{h, t}}:
           ifs(String, Text.ascii_punctuation(h),
-            u => SCon{h, md_decode_ee_go(f, t)},
-            u => SCon{'\\', md_decode_ee_go(f, SCon{h, t})})
+            u => md_decode_ee_go(f, t, SCon{h, acc}),
+            u => md_decode_ee_go(f, SCon{h, t}, SCon{'\\', acc}))
         case SCon{'&', t}:
           maybe_case(EntityHit, String, md_scan_entity_after_amp(t),
-            +hit => entity_hit_decoded(hit) ++ md_decode_ee_go(f, entity_hit_after(hit)),
-            u => SCon{'&', md_decode_ee_go(f, t)})
+            +hit => md_decode_ee_go(f, entity_hit_after(hit),
+              String.reverse(entity_hit_decoded(hit)) ++ acc),
+            u => md_decode_ee_go(f, t, SCon{'&', acc}))
         case SCon{h, t}:
-          SCon{h, md_decode_ee_go(f, t)}
+          md_decode_ee_go(f, t, SCon{h, acc})
 
 def md_decode_ee(+s: String) -> String:
-  md_decode_ee_go(Nat.add(String.length(s), 1n), s)
+  md_decode_ee_go(Nat.add(String.length(s), 1n), s, SNil{})
 
 def md_hex_digit_text(+x: U32) -> String:
   ifs(String, U32.is_le(x, 9),
@@ -414,14 +502,18 @@ def md_uri_safe_char(+c: Char) -> Bool:
     Char.is_eq(c, ')') || Char.is_eq(c, '*') || Char.is_eq(c, '+') ||
     Char.is_eq(c, ',') || Char.is_eq(c, ';') || Char.is_eq(c, '=')
 
-def md_uri_encode(s: String) -> String:
+def md_uri_encode_go(s: String, +acc: String) -> String:
   match s:
     case SNil{}:
-      SNil{}
+      String.reverse(acc)
     case SCon{+h, +t}:
       ifs(String, md_uri_safe_char(h),
-        u => SCon{h, md_uri_encode(t)},
-        u => md_percent_codepoint(Char.to_u32(h)) ++ md_uri_encode(t))
+        u => md_uri_encode_go(t, SCon{h, acc}),
+        u => md_uri_encode_go(t,
+          String.reverse(md_percent_codepoint(Char.to_u32(h))) ++ acc))
+
+def md_uri_encode(+s: String) -> String:
+  md_uri_encode_go(s, SNil{})
 
 def md_normalize_uri(+s: String) -> String:
   md_uri_encode(md_decode_ee(s))
@@ -439,6 +531,16 @@ def md_compact_horizontal_space_go(s: String, +acc: String) -> String:
 
 def md_compact_horizontal_space(s: String) -> String:
   md_compact_horizontal_space_go(s, SNil{})
+
+def md_string_to_lower_go(s: String, +acc: String) -> String:
+  match s:
+    case SNil{}:
+      String.reverse(acc)
+    case SCon{+h, +t}:
+      md_string_to_lower_go(t, SCon{Char.to_lower(h), acc})
+
+def md_string_to_lower(+s: String) -> String:
+  md_string_to_lower_go(s, SNil{})
 
 def md_all_char(s: String, +c: Char) -> Bool:
   match s:
@@ -535,14 +637,17 @@ def md_text_node(+text: String, +start: U32) -> List<&2, Ast.Inline>:
     u => Nil{},
     u => Ast.IText{text, md_span_text(start, text)} <> Nil{})
 
-def md_code_newlines_to_spaces(s: String) -> String:
+def md_code_newlines_to_spaces_go(s: String, +acc: String) -> String:
   match s:
     case SNil{}:
-      SNil{}
+      String.reverse(acc)
     case SCon{'\n', t}:
-      SCon{' ', md_code_newlines_to_spaces(t)}
-    case SCon{h, t}:
-      SCon{h, md_code_newlines_to_spaces(t)}
+      md_code_newlines_to_spaces_go(t, SCon{' ', acc})
+    case SCon{+h, +t}:
+      md_code_newlines_to_spaces_go(t, SCon{h, acc})
+
+def md_code_newlines_to_spaces(+s: String) -> String:
+  md_code_newlines_to_spaces_go(s, SNil{})
 
 def md_all_spaces(s: String) -> Bool:
   match s:
@@ -733,7 +838,9 @@ def md_title_has_blank_line(s: String) -> Bool:
     case SNil{}:
       False{}
     case SCon{'\n', +t}:
-      md_title_newline_blank(t) || md_title_has_blank_line(t)
+      ifs(Bool, md_title_newline_blank(t),
+        u => True{},
+        u => md_title_has_blank_line(t))
     case SCon{h, t}:
       md_title_has_blank_line(t)
 
@@ -947,7 +1054,9 @@ def md_label_has_nonspace(s: String) -> Bool:
     case SNil{}:
       False{}
     case SCon{+h, +t}:
-      Bool.or(Bool.not(md_inline_space_char(h)), md_label_has_nonspace(t))
+      ifs(Bool, md_inline_space_char(h),
+        u => md_label_has_nonspace(t),
+        u => True{})
 
 def md_scan_link_label(+s: String) -> Maybe<&2, StrSplit>:
   ifs(Maybe<&2, StrSplit>, String.starts_with(s, "["),
@@ -1204,7 +1313,9 @@ def md_refs_have_label(+refs: List<&2, RefDef>, +label: String) -> Bool:
     case Nil{}:
       False{}
     case h <> t:
-      Bool.or(String.eq(ref_def_label(h), label), md_refs_have_label(t, label))
+      ifs(Bool, String.eq(ref_def_label(h), label),
+        u => True{},
+        u => md_refs_have_label(t, label))
 
 def md_lookup_ref(+refs: List<&2, RefDef>, +label: String) -> Maybe<&2, RefDef>:
   match refs:
@@ -1223,8 +1334,10 @@ def md_uri_scheme_tail(s: String) -> Bool:
   match s:
     case SNil{}:
       True{}
-    case SCon{h, t}:
-      Bool.and(md_uri_scheme_char(h), md_uri_scheme_tail(t))
+    case SCon{+h, +t}:
+      ifs(Bool, md_uri_scheme_char(h),
+        u => md_uri_scheme_tail(t),
+        u => False{})
 
 def md_uri_scheme_valid(+scheme: String) -> Bool:
   match scheme:
@@ -1715,18 +1828,21 @@ def md_scan_inline_link_choice(+textlabel: String, +afterclose: String, +bracket
 # and escapes are decoded and the ASCII markup delimiters most common in image
 # descriptions are removed.  This intentionally avoids a second AST-walking
 # recursive machine in the inline parser.
-def md_strip_alt_markup(s: String) -> String:
+def md_strip_alt_markup_go(s: String, +acc: String) -> String:
   match s:
     case SNil{}:
-      SNil{}
+      String.reverse(acc)
     case SCon{'*', t}:
-      md_strip_alt_markup(t)
+      md_strip_alt_markup_go(t, acc)
     case SCon{'_', t}:
-      md_strip_alt_markup(t)
+      md_strip_alt_markup_go(t, acc)
     case SCon{'`', t}:
-      md_strip_alt_markup(t)
-    case SCon{h, t}:
-      SCon{h, md_strip_alt_markup(t)}
+      md_strip_alt_markup_go(t, acc)
+    case SCon{+h, +t}:
+      md_strip_alt_markup_go(t, SCon{h, acc})
+
+def md_strip_alt_markup(+s: String) -> String:
+  md_strip_alt_markup_go(s, SNil{})
 
 def md_alt_text(+label: String) -> String:
   md_strip_alt_markup(md_decode_ee(label))
@@ -1895,16 +2011,19 @@ def md_emph_tokenize_text(+text: String, +span: Ast.Span,
     +delim => md_make_tok_delim(delim),
     u => md_make_tok_node(Ast.IText{text, span}))
 
-def md_emph_tokenize(+infos: List<&2, MdEmphDelim>, xs: List<&2, Ast.Inline>) -> List<&2, MdEmphTok>:
+def md_emph_tokenize_go(+infos: List<&2, MdEmphDelim>, xs: List<&2, Ast.Inline>, +acc: List<&2, MdEmphTok>) -> List<&2, MdEmphTok>:
   match xs:
     case Nil{}:
-      Nil{}
+      List.reverse(&2, MdEmphTok, acc)
     case h <> t:
       match h:
         case Ast.IText{text, span}:
-          md_emph_tokenize_text(text, span, infos) <> md_emph_tokenize(infos, t)
+          md_emph_tokenize_go(infos, t, md_emph_tokenize_text(text, span, infos) <> acc)
         case u:
-          md_make_tok_node(u) <> md_emph_tokenize(infos, t)
+          md_emph_tokenize_go(infos, t, md_make_tok_node(u) <> acc)
+
+def md_emph_tokenize(+infos: List<&2, MdEmphDelim>, +xs: List<&2, Ast.Inline>) -> List<&2, MdEmphTok>:
+  md_emph_tokenize_go(infos, xs, Nil{})
 
 def md_emph_tok_finish(tok: MdEmphTok) -> Ast.Inline:
   match tok:
@@ -1914,12 +2033,15 @@ def md_emph_tok_finish(tok: MdEmphTok) -> Ast.Inline:
       +text = md_repeat_char(md_delim_marker(delim), md_delim_count(delim))
       Ast.IText{text, md_make_span(md_delim_start(delim), md_delim_end(delim))}
 
-def md_emph_finalize_tokens(xs: List<&2, MdEmphTok>) -> List<&2, Ast.Inline>:
+def md_emph_finalize_tokens_go(xs: List<&2, MdEmphTok>, +acc: List<&2, Ast.Inline>) -> List<&2, Ast.Inline>:
   match xs:
     case Nil{}:
-      Nil{}
+      List.reverse(&2, Ast.Inline, acc)
     case h <> t:
-      md_emph_tok_finish(h) <> md_emph_finalize_tokens(t)
+      md_emph_finalize_tokens_go(t, md_emph_tok_finish(h) <> acc)
+
+def md_emph_finalize_tokens(+xs: List<&2, MdEmphTok>) -> List<&2, Ast.Inline>:
+  md_emph_finalize_tokens_go(xs, Nil{})
 
 type MdEmphHit is Data:
   MdEmphHit{index: Nat, delim: MdEmphDelim}
@@ -2025,18 +2147,18 @@ def md_emph_wrap_tokens(+tokens: List<&2, MdEmphTok>, +oi: Nat, +ci: Nat,
   +newop = md_delim_open_remainder(op, openleft)
   +newcl = md_delim_close_remainder(cl, closeleft)
   +middlelen = Nat.sub(ci, Nat.add(oi, 1n))
-  +middle = List.take(&2, MdEmphTok, List.drop(&2, MdEmphTok, tokens, Nat.add(oi, 1n)), middlelen)
+  +middle = md_list_take(&2, MdEmphTok, md_list_drop(&2, MdEmphTok, tokens, Nat.add(oi, 1n)), middlelen)
   +inner = md_emph_finalize_tokens(middle)
   +span = md_make_span(U32.sub(md_delim_end(op), U32.from_nat(use)), U32.add(md_delim_start(cl), U32.from_nat(use)))
   +node = Bool.pick(Ast.Inline, Nat.is_eq(use, 2n),
     md_make_istrong(inner, span),
     md_make_iemph(inner, span))
-  +before = List.take(&2, MdEmphTok, tokens, oi)
-  +after = List.drop(&2, MdEmphTok, tokens, Nat.add(ci, 1n))
+  +before = md_list_take(&2, MdEmphTok, tokens, oi)
+  +after = md_list_drop(&2, MdEmphTok, tokens, Nat.add(ci, 1n))
   +tail = md_emph_cons_remainder(newcl, after)
   +center = md_cons_tok_node(node, tail)
   +front = md_emph_cons_remainder(newop, center)
-  List.append(&2, MdEmphTok, before, front)
+  md_list_append(&2, MdEmphTok, before, front)
 
 def md_emph_process(fuel: Nat, +tokens: List<&2, MdEmphTok>) -> List<&2, Ast.Inline>:
   match fuel:
@@ -2047,7 +2169,7 @@ def md_emph_process(fuel: Nat, +tokens: List<&2, MdEmphTok>) -> List<&2, Ast.Inl
         +closerhit =>
           +ci = md_emph_hit_index(closerhit)
           +cl = md_emph_hit_delim(closerhit)
-          +beforecloser = List.take(&2, MdEmphTok, tokens, ci)
+          +beforecloser = md_list_take(&2, MdEmphTok, tokens, ci)
           maybe_case(MdEmphHit, List<&2, Ast.Inline>, md_find_emph_opener(beforecloser, cl),
             +openerhit =>
               +oi = md_emph_hit_index(openerhit)
@@ -2056,7 +2178,7 @@ def md_emph_process(fuel: Nat, +tokens: List<&2, MdEmphTok>) -> List<&2, Ast.Inl
             u =>
               +newcloser = md_delim_close_off(cl)
               md_emph_process(f,
-                List.set(&2, MdEmphTok, tokens, ci, md_make_tok_delim(newcloser)))),
+                md_list_set(&2, MdEmphTok, tokens, ci, md_make_tok_delim(newcloser)))),
         u => md_emph_finalize_tokens(tokens))
 
 def md_emph_resolve_input_ctx(+s: String, +pos: U32, +hasprev: Bool, +prevcode: U32,
@@ -2085,78 +2207,84 @@ def md_inline_tree_has_link_go(fuel: Nat, xs: List<&2, Ast.Inline>) -> Bool:
             case Ast.ILink{children, href, title, span, destination}:
               True{}
             case Ast.IEmph{children, span}:
-              md_inline_tree_has_link_go(f, children) || md_inline_tree_has_link_go(f, t)
+              md_inline_tree_has_link_go(f, md_list_append(&2, Ast.Inline, children, t))
             case Ast.IStrong{children, span}:
-              md_inline_tree_has_link_go(f, children) || md_inline_tree_has_link_go(f, t)
+              md_inline_tree_has_link_go(f, md_list_append(&2, Ast.Inline, children, t))
             case Ast.IBold{children, span}:
-              md_inline_tree_has_link_go(f, children) || md_inline_tree_has_link_go(f, t)
+              md_inline_tree_has_link_go(f, md_list_append(&2, Ast.Inline, children, t))
             case Ast.IItalic{children, span}:
-              md_inline_tree_has_link_go(f, children) || md_inline_tree_has_link_go(f, t)
+              md_inline_tree_has_link_go(f, md_list_append(&2, Ast.Inline, children, t))
             case Ast.IDeleted{children, span}:
-              md_inline_tree_has_link_go(f, children) || md_inline_tree_has_link_go(f, t)
+              md_inline_tree_has_link_go(f, md_list_append(&2, Ast.Inline, children, t))
             case Ast.IInserted{children, span}:
-              md_inline_tree_has_link_go(f, children) || md_inline_tree_has_link_go(f, t)
+              md_inline_tree_has_link_go(f, md_list_append(&2, Ast.Inline, children, t))
             case Ast.ISuperscript{children, span}:
-              md_inline_tree_has_link_go(f, children) || md_inline_tree_has_link_go(f, t)
+              md_inline_tree_has_link_go(f, md_list_append(&2, Ast.Inline, children, t))
             case Ast.ISubscript{children, span}:
-              md_inline_tree_has_link_go(f, children) || md_inline_tree_has_link_go(f, t)
+              md_inline_tree_has_link_go(f, md_list_append(&2, Ast.Inline, children, t))
             case Ast.ISpan{children, attrs, span}:
-              md_inline_tree_has_link_go(f, children) || md_inline_tree_has_link_go(f, t)
+              md_inline_tree_has_link_go(f, md_list_append(&2, Ast.Inline, children, t))
             case u:
               md_inline_tree_has_link_go(f, t)
 
-def md_inline_tree_has_link(+xs: List<&2, Ast.Inline>) -> Bool:
-  md_inline_tree_has_link_go(Nat.add(Nat.mul(4n, List.length(&2, Ast.Inline, xs)), 4n), xs)
+def md_inline_tree_fuel(+source: String) -> Nat:
+  Nat.add(Nat.mul(16n, Text.utf8_length(source)), 16n)
 
-def md_alt_inlines_go(fuel: Nat, xs: List<&2, Ast.Inline>) -> String:
+def md_inline_tree_has_link(+source: String, +xs: List<&2, Ast.Inline>) -> Bool:
+  md_inline_tree_has_link_go(md_inline_tree_fuel(source), xs)
+
+def md_alt_inlines_finish(+chunks: List<&2, String>) -> String:
+  md_string_concat(List.reverse(&2, String, chunks))
+
+def md_alt_inlines_go(fuel: Nat, xs: List<&2, Ast.Inline>, +chunks: List<&2, String>) -> String:
   match fuel:
     case 0n:
-      ""
+      md_alt_inlines_finish(chunks)
     case 1n++f:
       match xs:
         case Nil{}:
-          ""
+          md_alt_inlines_finish(chunks)
         case h <> t:
           match h:
             case Ast.IText{text, span}:
-              text ++ md_alt_inlines_go(f, t)
+              md_alt_inlines_go(f, t, text <> chunks)
             case Ast.ICode{text, span}:
-              text ++ md_alt_inlines_go(f, t)
+              md_alt_inlines_go(f, t, text <> chunks)
             case Ast.IEmph{children, span}:
-              md_alt_inlines_go(f, children) ++ md_alt_inlines_go(f, t)
+              md_alt_inlines_go(f, md_list_append(&2, Ast.Inline, children, t), chunks)
             case Ast.IStrong{children, span}:
-              md_alt_inlines_go(f, children) ++ md_alt_inlines_go(f, t)
+              md_alt_inlines_go(f, md_list_append(&2, Ast.Inline, children, t), chunks)
             case Ast.IBold{children, span}:
-              md_alt_inlines_go(f, children) ++ md_alt_inlines_go(f, t)
+              md_alt_inlines_go(f, md_list_append(&2, Ast.Inline, children, t), chunks)
             case Ast.IItalic{children, span}:
-              md_alt_inlines_go(f, children) ++ md_alt_inlines_go(f, t)
+              md_alt_inlines_go(f, md_list_append(&2, Ast.Inline, children, t), chunks)
             case Ast.IDeleted{children, span}:
-              md_alt_inlines_go(f, children) ++ md_alt_inlines_go(f, t)
+              md_alt_inlines_go(f, md_list_append(&2, Ast.Inline, children, t), chunks)
             case Ast.IInserted{children, span}:
-              md_alt_inlines_go(f, children) ++ md_alt_inlines_go(f, t)
+              md_alt_inlines_go(f, md_list_append(&2, Ast.Inline, children, t), chunks)
             case Ast.ISuperscript{children, span}:
-              md_alt_inlines_go(f, children) ++ md_alt_inlines_go(f, t)
+              md_alt_inlines_go(f, md_list_append(&2, Ast.Inline, children, t), chunks)
             case Ast.ISubscript{children, span}:
-              md_alt_inlines_go(f, children) ++ md_alt_inlines_go(f, t)
+              md_alt_inlines_go(f, md_list_append(&2, Ast.Inline, children, t), chunks)
             case Ast.ISpan{children, attrs, span}:
-              md_alt_inlines_go(f, children) ++ md_alt_inlines_go(f, t)
+              md_alt_inlines_go(f, md_list_append(&2, Ast.Inline, children, t), chunks)
             case Ast.ILink{children, href, title, span, destination}:
-              md_alt_inlines_go(f, children) ++ md_alt_inlines_go(f, t)
+              md_alt_inlines_go(f, md_list_append(&2, Ast.Inline, children, t), chunks)
             case Ast.IImage{src, alt, title, span, destination}:
-              alt ++ md_alt_inlines_go(f, t)
+              md_alt_inlines_go(f, t, alt <> chunks)
             case Ast.IAutolink{href, label, span, destination}:
-              label ++ md_alt_inlines_go(f, t)
+              md_alt_inlines_go(f, t, label <> chunks)
             case Ast.IRawHtml{text, span}:
-              md_alt_inlines_go(f, t)
+              md_alt_inlines_go(f, t, chunks)
             case Ast.ISoftBreak{span}:
-              "\n" ++ md_alt_inlines_go(f, t)
+              md_alt_inlines_go(f, t, "\n" <> chunks)
             case Ast.IHardBreak{span}:
-              "\n" ++ md_alt_inlines_go(f, t)
+              md_alt_inlines_go(f, t, "\n" <> chunks)
             case Ast.IFootnoteRef{number, span}:
-              md_alt_inlines_go(f, t)
+              md_alt_inlines_go(f, t, chunks)
 
-def md_alt_inlines(+xs: List<&2, Ast.Inline>) -> String:
-  md_alt_inlines_go(Nat.add(Nat.mul(6n, List.length(&2, Ast.Inline, xs)), 6n), xs)
+def md_alt_inlines(+source: String, +xs: List<&2, Ast.Inline>) -> String:
+  md_alt_inlines_go(md_inline_tree_fuel(source), xs, Nil{})
 
 # Piecewise positions for inline input assembled from multiple source lines.
 # `assumed_start` is the contiguous coordinate seen by the inline scanner;
@@ -2345,34 +2473,37 @@ def md_map_inline_nodes(+segs: List<&2, MdInlineSegment>,
 # Inline scanner.  It is one recursive definition, so there is no mutual
 # recursion; nested content and the continuation both recurse on fuel's
 # predecessor.  Malformed delimiters consume at least one byte as literal text.
-def md_parse_inlines(fuel: Nat, +refs: List<&2, RefDef>, +s: String, +pos: U32) -> List<&2, Ast.Inline>:
+def md_parse_inlines(fuel: Nat, +refs: List<&2, RefDef>, +s: String, +pos: U32, +acc: List<&2, Ast.Inline>) -> List<&2, Ast.Inline>:
   match fuel:
     case 0n:
-      md_text_node(s, pos)
+      md_list_rev_onto(&2, Ast.Inline, acc, md_text_node(s, pos))
     case 1n++f:
       match s:
         case SNil{}:
-          Nil{}
+          List.reverse(&2, Ast.Inline, acc)
         case SCon{'\n', t}:
           +endpos = md_pos_add(pos, 1n)
-          Ast.ISoftBreak{Ast.Span{pos, endpos}} <> md_parse_inlines(f, refs, t, endpos)
+          md_parse_inlines(f, refs, t, endpos,
+            Ast.ISoftBreak{Ast.Span{pos, endpos}} <> acc)
         case SCon{'\\', SCon{'\n', t}}:
           +after = md_drop_leading_spaces(t)
           +skipped = Nat.sub(Text.utf8_length(t), Text.utf8_length(after))
           +breakend = md_pos_add(pos, 2n)
           +newpos = md_pos_add(breakend, skipped)
-          Ast.IHardBreak{Ast.Span{pos, breakend}} <> md_parse_inlines(f, refs, after, newpos)
+          md_parse_inlines(f, refs, after, newpos,
+            Ast.IHardBreak{Ast.Span{pos, breakend}} <> acc)
         case SCon{'\\', SCon{+h, +t}}:
           ifs(List<&2, Ast.Inline>, Text.ascii_punctuation(h),
             u =>
               +escaped = md_char_string(h)
               +endpos = md_pos_add(pos, 2n)
-              Ast.IText{escaped, Ast.Span{pos, endpos}} <> md_parse_inlines(f, refs, t, endpos),
-            u => Ast.IText{"\\", md_span_text(pos, "\\")} <>
-              md_parse_inlines(f, refs, SCon{h, t}, md_pos_add_text(pos, "\\")))
+              md_parse_inlines(f, refs, t, endpos,
+                Ast.IText{escaped, Ast.Span{pos, endpos}} <> acc),
+            u => md_parse_inlines(f, refs, SCon{h, t}, md_pos_add_text(pos, "\\"),
+              Ast.IText{"\\", md_span_text(pos, "\\")} <> acc))
         case SCon{'\\', t}:
-          Ast.IText{"\\", md_span_text(pos, "\\")} <>
-            md_parse_inlines(f, refs, t, md_pos_add_text(pos, "\\"))
+          md_parse_inlines(f, refs, t, md_pos_add_text(pos, "\\"),
+            Ast.IText{"\\", md_span_text(pos, "\\")} <> acc)
         case SCon{'&', t}:
           maybe_case(EntityHit, List<&2, Ast.Inline>, md_scan_entity_after_amp(t),
             +hit =>
@@ -2380,9 +2511,10 @@ def md_parse_inlines(fuel: Nat, +refs: List<&2, RefDef>, +s: String, +pos: U32) 
               +after = entity_hit_after(hit)
               +used = Nat.sub(Text.utf8_length(s), Text.utf8_length(after))
               +endpos = md_pos_add(pos, used)
-              Ast.IText{decoded, Ast.Span{pos, endpos}} <> md_parse_inlines(f, refs, after, endpos)
-            u => Ast.IText{"&", md_span_text(pos, "&")} <>
-              md_parse_inlines(f, refs, t, md_pos_add_text(pos, "&")))
+              md_parse_inlines(f, refs, after, endpos,
+                Ast.IText{decoded, Ast.Span{pos, endpos}} <> acc)
+            u => md_parse_inlines(f, refs, t, md_pos_add_text(pos, "&"),
+              Ast.IText{"&", md_span_text(pos, "&")} <> acc))
         case SCon{'`', t}:
           +run = md_count_prefix(s, '`', 0n)
           +needle = md_repeat_char('`', run)
@@ -2396,12 +2528,12 @@ def md_parse_inlines(fuel: Nat, +refs: List<&2, RefDef>, +s: String, +pos: U32) 
               +content_end = md_pos_add_text(content_start, content)
               +endpos = md_pos_add(content_end, open_bytes)
               ifs(List<&2, Ast.Inline>, String.is_empty(content),
-                u => Ast.IText{needle, md_span_text(pos, needle)} <>
-                  md_parse_inlines(f, refs, after_open, md_pos_add_text(pos, needle)),
-                u => Ast.ICode{md_normalize_code_span(content), Ast.Span{pos, endpos}} <>
-                  md_parse_inlines(f, refs, rest, endpos))
-            u => Ast.IText{needle, md_span_text(pos, needle)} <>
-              md_parse_inlines(f, refs, after_open, md_pos_add_text(pos, needle)))
+                u => md_parse_inlines(f, refs, after_open, md_pos_add_text(pos, needle),
+                  Ast.IText{needle, md_span_text(pos, needle)} <> acc),
+                u => md_parse_inlines(f, refs, rest, endpos,
+                  Ast.ICode{md_normalize_code_span(content), Ast.Span{pos, endpos}} <> acc))
+            u => md_parse_inlines(f, refs, after_open, md_pos_add_text(pos, needle),
+              Ast.IText{needle, md_span_text(pos, needle)} <> acc))
         case SCon{'[', t}:
           maybe_case(StrSplit, List<&2, Ast.Inline>, md_scan_bracket(t),
             +closehit =>
@@ -2421,19 +2553,19 @@ def md_parse_inlines(fuel: Nat, +refs: List<&2, RefDef>, +s: String, +pos: U32) 
                   +label_start = md_pos_add(pos, 1n)
                   +used = Nat.sub(Text.utf8_length(s), Text.utf8_length(rest))
                   +endpos = md_pos_add(pos, used)
-                  +labelinner0 = md_parse_inlines(f, refs, label, label_start)
+                  +labelinner0 = md_parse_inlines(f, refs, label, label_start, Nil{})
                   +labelinner = md_emph_resolve_link_label_input(label, label_start, labelinner0)
-                  +nestedlink = md_inline_tree_has_link(labelinner)
+                  +nestedlink = md_inline_tree_has_link(label, labelinner)
                   ifs(List<&2, Ast.Inline>, nestedlink,
-                    q => Ast.IText{"[", md_span_text(pos, "[")} <>
-                      md_parse_inlines(f, refs, t, md_pos_add_text(pos, "[")),
-                    q => Ast.ILink{labelinner, link_target_href(goodtarget),
-                      link_target_title(goodtarget), Ast.Span{pos, endpos}, destmeta} <>
-                      md_parse_inlines(f, refs, rest, endpos)),
-                z => Ast.IText{"[", md_span_text(pos, "[")} <>
-                  md_parse_inlines(f, refs, t, md_pos_add_text(pos, "[")))
-            u => Ast.IText{"[", md_span_text(pos, "[")} <>
-              md_parse_inlines(f, refs, t, md_pos_add_text(pos, "[")))
+                    q => md_parse_inlines(f, refs, t, md_pos_add_text(pos, "["),
+                      Ast.IText{"[", md_span_text(pos, "[")} <> acc),
+                    q => md_parse_inlines(f, refs, rest, endpos,
+                      Ast.ILink{labelinner, link_target_href(goodtarget),
+                        link_target_title(goodtarget), Ast.Span{pos, endpos}, destmeta} <> acc)),
+                z => md_parse_inlines(f, refs, t, md_pos_add_text(pos, "["),
+                  Ast.IText{"[", md_span_text(pos, "[")} <> acc))
+            u => md_parse_inlines(f, refs, t, md_pos_add_text(pos, "["),
+              Ast.IText{"[", md_span_text(pos, "[")} <> acc))
         case SCon{'!', SCon{'[', tt}}:
           maybe_case(StrSplit, List<&2, Ast.Inline>, md_scan_bracket(tt),
             +closehit =>
@@ -2453,26 +2585,27 @@ def md_parse_inlines(fuel: Nat, +refs: List<&2, RefDef>, +s: String, +pos: U32) 
                   +label_start = md_pos_add(pos, 2n)
                   +used = Nat.sub(Text.utf8_length(s), Text.utf8_length(rest))
                   +endpos = md_pos_add(pos, used)
-                  +children0 = md_parse_inlines(f, refs, label, label_start)
+                  +children0 = md_parse_inlines(f, refs, label, label_start, Nil{})
                   +children = md_emph_resolve_link_label_input(label, label_start, children0)
-                  +alttext = md_alt_inlines(children)
-                  Ast.IImage{link_target_href(goodtarget), alttext,
-                    link_target_title(goodtarget), Ast.Span{pos, endpos}, destmeta} <>
-                    md_parse_inlines(f, refs, rest, endpos),
-                z => Ast.IText{"!", md_span_text(pos, "!")} <>
-                  md_parse_inlines(f, refs, SCon{'[', tt}, md_pos_add_text(pos, "!")))
-            u => Ast.IText{"!", md_span_text(pos, "!")} <>
-              md_parse_inlines(f, refs, SCon{'[', tt}, md_pos_add_text(pos, "!")))
+                  +alttext = md_alt_inlines(label, children)
+                  md_parse_inlines(f, refs, rest, endpos,
+                    Ast.IImage{link_target_href(goodtarget), alttext,
+                      link_target_title(goodtarget), Ast.Span{pos, endpos}, destmeta} <> acc),
+                z => md_parse_inlines(f, refs, SCon{'[', tt}, md_pos_add_text(pos, "!"),
+                  Ast.IText{"!", md_span_text(pos, "!")} <> acc))
+            u => md_parse_inlines(f, refs, SCon{'[', tt}, md_pos_add_text(pos, "!"),
+              Ast.IText{"!", md_span_text(pos, "!")} <> acc))
         case SCon{'!', t}:
-          Ast.IText{"!", md_span_text(pos, "!")} <>
-            md_parse_inlines(f, refs, t, md_pos_add_text(pos, "!"))
+          md_parse_inlines(f, refs, t, md_pos_add_text(pos, "!"),
+            Ast.IText{"!", md_span_text(pos, "!")} <> acc)
         case SCon{'<', t}:
           maybe_case(StrSplit, List<&2, Ast.Inline>, md_scan_raw_html(s),
             +rawhit =>
               +raw = str_split_before(rawhit)
               +rawrest = str_split_after(rawhit)
               +rawend = md_pos_add_text(pos, raw)
-              Ast.IRawHtml{raw, Ast.Span{pos, rawend}} <> md_parse_inlines(f, refs, rawrest, rawend)
+              md_parse_inlines(f, refs, rawrest, rawend,
+                Ast.IRawHtml{raw, Ast.Span{pos, rawend}} <> acc)
             u =>
               maybe_case(StrSplit, List<&2, Ast.Inline>, md_find_split(t, ">"),
                 +hit =>
@@ -2487,20 +2620,21 @@ def md_parse_inlines(fuel: Nat, +refs: List<&2, RefDef>, +s: String, +pos: U32) 
                   +autospan = md_inline_dest_span_finish(labelstart, label)
                   +destmeta = md_link_destination(label, md_autolink_logical_href(label, is_email), autospan, None{})
                   ifs(List<&2, Ast.Inline>, ok,
-                    v => Ast.IAutolink{md_autolink_href(label, is_email), label,
-                      Ast.Span{pos, endpos}, destmeta} <> md_parse_inlines(f, refs, rest, endpos),
-                    v => Ast.IText{"<", md_span_text(pos, "<")} <>
-                      md_parse_inlines(f, refs, t, md_pos_add_text(pos, "<")))
-                u => Ast.IText{"<", md_span_text(pos, "<")} <>
-                  md_parse_inlines(f, refs, t, md_pos_add_text(pos, "<"))))
+                    v => md_parse_inlines(f, refs, rest, endpos,
+                      Ast.IAutolink{md_autolink_href(label, is_email), label,
+                        Ast.Span{pos, endpos}, destmeta} <> acc),
+                    v => md_parse_inlines(f, refs, t, md_pos_add_text(pos, "<"),
+                      Ast.IText{"<", md_span_text(pos, "<")} <> acc))
+                u => md_parse_inlines(f, refs, t, md_pos_add_text(pos, "<"),
+                  Ast.IText{"<", md_span_text(pos, "<")} <> acc)))
         case SCon{h, t}:
           ifs(List<&2, Ast.Inline>, md_is_emphasis_char(h),
             u =>
               +run = md_count_prefix(s, h, 0n)
               +delimiter = md_repeat_char(h, run)
               +endpos = md_pos_add(pos, run)
-              Ast.IText{delimiter, Ast.Span{pos, endpos}} <>
-                md_parse_inlines(f, refs, String.drop(s, run), endpos)
+              md_parse_inlines(f, refs, String.drop(s, run), endpos,
+                Ast.IText{delimiter, Ast.Span{pos, endpos}} <> acc)
             u =>
               +n = md_plain_index(s, 0n)
               +plain0 = md_take(s, n)
@@ -2522,27 +2656,28 @@ def md_parse_inlines(fuel: Nat, +refs: List<&2, RefDef>, +s: String, +pos: U32) 
                   ifs(List<&2, Ast.Inline>, hard,
                     w =>
                       ifs(List<&2, Ast.Inline>, String.is_empty(plain),
-                        x => Ast.IHardBreak{Ast.Span{pos, nlend}} <>
-                          md_parse_inlines(f, refs, after, newpos),
-                        x => Ast.IText{plain, Ast.Span{pos, plainend}} <>
+                        x => md_parse_inlines(f, refs, after, newpos,
+                          Ast.IHardBreak{Ast.Span{pos, nlend}} <> acc),
+                        x => md_parse_inlines(f, refs, after, newpos,
                           Ast.IHardBreak{Ast.Span{plainend, nlend}} <>
-                          md_parse_inlines(f, refs, after, newpos)),
+                            Ast.IText{plain, Ast.Span{pos, plainend}} <> acc)),
                     w =>
                       ifs(List<&2, Ast.Inline>, String.is_empty(plain),
-                        x => Ast.ISoftBreak{Ast.Span{nlpos, nlend}} <>
-                          md_parse_inlines(f, refs, after, newpos),
-                        x => Ast.IText{plain, Ast.Span{pos, plainend}} <>
+                        x => md_parse_inlines(f, refs, after, newpos,
+                          Ast.ISoftBreak{Ast.Span{nlpos, nlend}} <> acc),
+                        x => md_parse_inlines(f, refs, after, newpos,
                           Ast.ISoftBreak{Ast.Span{nlpos, nlend}} <>
-                          md_parse_inlines(f, refs, after, newpos))),
+                            Ast.IText{plain, Ast.Span{pos, plainend}} <> acc))),
                 v =>
                   +endpos = md_pos_add_text(pos, plain0)
-                  Ast.IText{plain0, Ast.Span{pos, endpos}} <> md_parse_inlines(f, refs, rest, endpos)))
+                  md_parse_inlines(f, refs, rest, endpos,
+                    Ast.IText{plain0, Ast.Span{pos, endpos}} <> acc)))
 
 def md_parse_inlines_top(+refs: List<&2, RefDef>, +s: String, +pos: U32,
   +segs: List<&2, MdInlineSegment>) -> List<&2, Ast.Inline>:
   +len = Text.utf8_length(s)
   +fuel = Nat.add(Nat.mul(8n, len), 8n)
-  +scanned = md_parse_inlines(fuel, refs, s, pos)
+  +scanned = md_parse_inlines(fuel, refs, s, pos, Nil{})
   +resolved = md_emph_resolve_input(s, pos, scanned)
   md_map_inline_nodes(segs, resolved, len)
 
@@ -3108,12 +3243,15 @@ def md_quote_listish(+s: String) -> Bool:
 def md_drop_up_to_columns(+s: String, +n: Nat, +startcol: Nat) -> String:
   md_column_strip_text(md_strip_columns_from(s, n, startcol))
 
-def md_join_code_lines(xs: List<&2, String>) -> String:
+def md_join_code_lines_go(xs: List<&2, String>, +acc: String) -> String:
   match xs:
     case Nil{}:
-      SNil{}
+      acc
     case h <> t:
-      h ++ ("\n" ++ md_join_code_lines(t))
+      md_join_code_lines_go(t, h ++ "\n" ++ acc)
+
+def md_join_code_lines(+xs: List<&2, String>) -> String:
+  md_join_code_lines_go(List.reverse(&2, String, xs), SNil{})
 
 def md_drop_empty_front(+xs: List<&2, String>) -> List<&2, String>:
   match xs:
@@ -3245,7 +3383,7 @@ def md_html_type6_start(+s: String) -> Bool:
     u =>
       maybe_case(WordSplit, Bool, md_scan_html_tag_name(String.drop(s, offset)),
         +hit =>
-          +name = String.to_lower(word_split_word(hit))
+          +name = md_string_to_lower(word_split_word(hit))
           +known = String.contains(md_html_block6_names(), "|" ++ name ++ "|")
           Bool.and(known, md_html_type6_delimiter(word_split_rest(hit))),
         v => False{}),
@@ -3266,7 +3404,7 @@ def md_html_type7_start(+s0: String) -> Bool:
           +namepart = md_scan_html_tag_name(String.drop(s, offset))
           maybe_case(WordSplit, Bool, namepart,
             +namehit =>
-              +name = String.to_lower(word_split_word(namehit))
+              +name = md_string_to_lower(word_split_word(namehit))
               Bool.and(whole, Bool.not(md_html_type7_excluded(name))),
             v => False{}),
         v => False{}),
@@ -3628,7 +3766,7 @@ def md_rev_onto(+xs: List<&2, MdLine>, +acc: List<&2, MdLine>) -> List<&2, MdLin
       md_rev_onto(t, h <> acc)
 
 def md_restore_pending(+pendingrev: List<&2, MdLine>, +tail: List<&2, MdLine>) -> List<&2, MdLine>:
-  List.append(&2, MdLine, List.reverse(&2, MdLine, pendingrev), tail)
+  md_list_append(&2, MdLine, List.reverse(&2, MdLine, pendingrev), tail)
 
 def md_item_scan_finish(
   +accrev: List<&2, MdLine>,
@@ -3867,7 +4005,7 @@ def md_scan_raw_list(+xs: List<&2, MdLine>, ordered: Bool) -> MdRawListGrab:
     case Nil{}:
       MdRawListGrab{Nil{}, Nil{}, 0, False{}}
     case line <> rest:
-      +len = List.length(&2, MdLine, xs)
+      +len = md_list_length(&2, MdLine, xs)
       +fuel = Nat.add(Nat.mul(4n, len), 4n)
       +markcode = mlmi_markcode(md_scan_list_marker_info_at(md_line_text(line), md_line_col(line)))
       md_scan_raw_list_go(fuel, xs, ordered, markcode, Nil{}, False{}, 0, Nil{}, 0n)
@@ -3911,15 +4049,18 @@ def md_drop_upto3(+s: String) -> String:
   +n = Nat.min(md_marker_indent(s), 3n)
   String.drop(s, n)
 
-def md_paragraph_strings(xs: List<&2, MdLine>) -> List<&2, String>:
+def md_paragraph_strings_go(xs: List<&2, MdLine>, +acc: List<&2, String>) -> List<&2, String>:
   match xs:
     case Nil{}:
-      Nil{}
+      List.reverse(&2, String, acc)
     case line <> rest:
-      md_trim_start(md_line_text(line)) <> md_paragraph_strings(rest)
+      md_paragraph_strings_go(rest, md_trim_start(md_line_text(line)) <> acc)
+
+def md_paragraph_strings(+xs: List<&2, MdLine>) -> List<&2, String>:
+  md_paragraph_strings_go(xs, Nil{})
 
 def md_paragraph_text(+xs: List<&2, MdLine>) -> String:
-  md_trim_end(String.join(md_paragraph_strings(xs), "\n"))
+  md_trim_end(md_join_strings(md_paragraph_strings(xs), "\n"))
 
 def md_paragraph_inline_source(+xs: List<&2, MdLine>) -> MdInlineSource:
   match xs:
@@ -3937,18 +4078,21 @@ def md_paragraph_inline_source(+xs: List<&2, MdLine>) -> MdInlineSource:
 
 # If the conservative fuel estimate is ever exhausted, remaining lines still
 # degrade to literal paragraph text rather than disappearing or looping.
-def md_fallback_lines(+lines: List<&2, MdLine>) -> List<&2, Ast.Block>:
+def md_fallback_lines_go(lines: List<&2, MdLine>, +acc: List<&2, Ast.Block>) -> List<&2, Ast.Block>:
   match lines:
     case Nil{}:
-      Nil{}
-    case line <> rest:
+      List.reverse(&2, Ast.Block, acc)
+    case +line <> +rest:
       +text = md_line_text(line)
       ifs(List<&2, Ast.Block>, Text.blank_line(text),
-        u => md_fallback_lines(rest),
+        u => md_fallback_lines_go(rest, acc),
         u =>
           +span = md_line_span(line)
           leaf : Ast.Inline = Ast.IText{text, span}
-          Ast.BParagraph{[leaf], [], span} <> md_fallback_lines(rest))
+          md_fallback_lines_go(rest, Ast.BParagraph{[leaf], [], span} <> acc))
+
+def md_fallback_lines(+lines: List<&2, MdLine>) -> List<&2, Ast.Block>:
+  md_fallback_lines_go(lines, Nil{})
 
 # Block constructors in return position, so Bend does not need to infer the
 # empty attribute/list literals inside local bindings.
@@ -4032,32 +4176,42 @@ def md_lines_after_block(
 # line (blank lines included).  Container contents are parsed by a recursive
 # call on the extracted inner lines, and the outer continuation is a sibling
 # recursive call on the unconsumed remainder; both descend on fuel.
-def md_parse_work(fuel: Nat, +refs: List<&2, RefDef>, work: MdParseWork) -> MdParseOut:
+def md_parse_work(
+  fuel: Nat,
+  +refs: List<&2, RefDef>,
+  work: MdParseWork,
+  +accblocks: List<&2, Ast.Block>,
+  +accitems: List<&2, Ast.ListItem>
+) -> MdParseOut:
   match fuel:
     case 0n:
       match work:
         case MdWorkLines{lines, seenblock, blankafter, loose}:
-          MdParseOut{md_fallback_lines(lines), Nil{}, loose}
+          MdParseOut{md_list_rev_onto(&2, Ast.Block, accblocks, md_fallback_lines(lines)),
+            List.reverse(&2, Ast.ListItem, accitems), loose}
         case MdWorkItems{items, loose}:
-          MdParseOut{Nil{}, Nil{}, loose}
+          MdParseOut{List.reverse(&2, Ast.Block, accblocks),
+            List.reverse(&2, Ast.ListItem, accitems), loose}
     case 1n++f:
       match work:
         case MdWorkItems{items, +loose}:
           match items:
             case Nil{}:
-              MdParseOut{Nil{}, Nil{}, loose}
+              MdParseOut{List.reverse(&2, Ast.Block, accblocks),
+                List.reverse(&2, Ast.ListItem, accitems), loose}
             case +item <> restitems:
-              +bodyout = md_parse_work(f, refs, md_lines_work(md_raw_item_lines(item)))
+              +bodyout = md_parse_work(f, refs, md_lines_work(md_raw_item_lines(item)), Nil{}, Nil{})
               +bodyloose = md_parse_out_loose(bodyout)
               +bodyblocks = md_parse_out_blocks(bodyout)
-              +restout = md_parse_work(f, refs, MdWorkItems{restitems, loose || bodyloose})
               +span = md_make_span(md_raw_item_start(item), md_raw_item_end(item))
               itemout : Ast.ListItem = Ast.ListItem{bodyblocks, span}
-              md_parse_out_prepend_item(itemout, restout)
+              md_parse_work(f, refs, MdWorkItems{restitems, loose || bodyloose},
+                accblocks, itemout <> accitems)
         case MdWorkLines{lines, +seenblock, +blankafter, +loose}:
           match lines:
             case Nil{}:
-              MdParseOut{Nil{}, Nil{}, loose}
+              MdParseOut{List.reverse(&2, Ast.Block, accblocks),
+                List.reverse(&2, Ast.ListItem, accitems), loose}
             case +line <> +rest:
               +text = md_line_text(line)
               +start = md_line_start(line)
@@ -4065,16 +4219,17 @@ def md_parse_work(fuel: Nat, +refs: List<&2, RefDef>, work: MdParseWork) -> MdPa
               +linecol = md_line_col(line)
               +htmlkind = md_html_block_kind_at(text, linecol)
               ifs(MdParseOut, Text.blank_line(text),
-                u => md_parse_work(f, refs, MdWorkLines{rest, seenblock, True{}, loose}),
+                u => md_parse_work(f, refs, MdWorkLines{rest, seenblock, True{}, loose},
+                  accblocks, accitems),
                 u =>
                   ifs(MdParseOut, Nat.is_ne(htmlkind, 0n),
                     u =>
                       +grab = md_scan_html_block(line <> rest, htmlkind)
                       +content = md_join_code_lines(string_lines_grab_lines(grab))
                       +blockend = string_lines_grab_end(grab)
-                      +tailout = md_parse_work(f, refs,
-                        md_lines_after_block(string_lines_grab_rest(grab), seenblock, blankafter, loose))
-                      md_parse_out_prepend_block(md_make_html_block(content, start, blockend), tailout)
+                      md_parse_work(f, refs,
+                        md_lines_after_block(string_lines_grab_rest(grab), seenblock, blankafter, loose),
+                        md_make_html_block(content, start, blockend) <> accblocks, accitems)
                     u =>
                       ifs(MdParseOut, md_is_fence_start_at(text, linecol),
                         u =>
@@ -4085,9 +4240,9 @@ def md_parse_work(fuel: Nat, +refs: List<&2, RefDef>, work: MdParseWork) -> MdPa
                           +content = md_join_code_lines(string_lines_grab_lines(grab))
                           +blockend = string_lines_grab_end(grab)
                           +info = md_maybe_info(md_fence_info_at(text, linecol))
-                          +tailout = md_parse_work(f, refs,
-                            md_lines_after_block(string_lines_grab_rest(grab), seenblock, blankafter, loose))
-                          md_parse_out_prepend_block(md_make_code_block(content, info, start, blockend), tailout)
+                          md_parse_work(f, refs,
+                            md_lines_after_block(string_lines_grab_rest(grab), seenblock, blankafter, loose),
+                            md_make_code_block(content, info, start, blockend) <> accblocks, accitems)
                         u =>
                           ifs(MdParseOut, md_is_atx_at(text, linecol),
                             u =>
@@ -4095,25 +4250,25 @@ def md_parse_work(fuel: Nat, +refs: List<&2, RefDef>, work: MdParseWork) -> MdPa
                               +contentstart = md_atx_content_start_at(text, linecol, start, end)
                               +inlinesrc = md_inline_source_single(content, contentstart)
                               +level = md_atx_level_at(text, linecol)
-                              +tailout = md_parse_work(f, refs,
-                                md_lines_after_block(rest, seenblock, blankafter, loose))
-                              md_parse_out_prepend_block(md_make_heading_block(refs, level, inlinesrc, start, end), tailout)
+                              md_parse_work(f, refs,
+                                md_lines_after_block(rest, seenblock, blankafter, loose),
+                                md_make_heading_block(refs, level, inlinesrc, start, end) <> accblocks, accitems)
                             u =>
                               ifs(MdParseOut, md_is_thematic_at(text, linecol),
                                 u =>
-                                  +tailout = md_parse_work(f, refs,
-                                    md_lines_after_block(rest, seenblock, blankafter, loose))
-                                  md_parse_out_prepend_block(md_make_thematic_block(start, end), tailout)
+                                  md_parse_work(f, refs,
+                                    md_lines_after_block(rest, seenblock, blankafter, loose),
+                                    md_make_thematic_block(start, end) <> accblocks, accitems)
                                 u =>
                                   ifs(MdParseOut, md_is_quote_start_at(text, linecol),
                                     u =>
                                       +grab = md_scan_quote(line <> rest)
-                                      +innerout = md_parse_work(f, refs, md_lines_work(lines_grab_lines(grab)))
+                                      +innerout = md_parse_work(f, refs, md_lines_work(lines_grab_lines(grab)), Nil{}, Nil{})
                                       +inner = md_parse_out_blocks(innerout)
                                       +blockend = lines_grab_end(grab)
-                                      +tailout = md_parse_work(f, refs,
-                                        md_lines_after_block(lines_grab_rest(grab), seenblock, blankafter, loose))
-                                      md_parse_out_prepend_block(md_make_quote_block(inner, start, blockend), tailout)
+                                      md_parse_work(f, refs,
+                                        md_lines_after_block(lines_grab_rest(grab), seenblock, blankafter, loose),
+                                        md_make_quote_block(inner, start, blockend) <> accblocks, accitems)
                                     u =>
                                       ifs(MdParseOut, md_is_list_item_at(text, linecol),
                                         u =>
@@ -4123,24 +4278,24 @@ def md_parse_work(fuel: Nat, +refs: List<&2, RefDef>, work: MdParseWork) -> MdPa
                                           +startnum = mlmi_start(minfo)
                                           +rawitems = md_raw_list_grab_items(grab)
                                           +rawloose = md_raw_list_grab_loose(grab)
-                                          +itemsout = md_parse_work(f, refs, MdWorkItems{rawitems, rawloose})
+                                          +itemsout = md_parse_work(f, refs, MdWorkItems{rawitems, rawloose}, Nil{}, Nil{})
                                           +listitems = md_parse_out_items(itemsout)
                                           +listloose = md_parse_out_loose(itemsout)
                                           +blockend = md_raw_list_grab_end(grab)
                                           +listblock = md_make_list_block(ordered, startnum,
                                             Bool.not(listloose), listitems, start, blockend)
-                                          +tailout = md_parse_work(f, refs,
-                                            md_lines_after_block(md_raw_list_grab_rest(grab), seenblock, blankafter, loose))
-                                          md_parse_out_prepend_block(listblock, tailout)
+                                          md_parse_work(f, refs,
+                                            md_lines_after_block(md_raw_list_grab_rest(grab), seenblock, blankafter, loose),
+                                            listblock <> accblocks, accitems)
                                         u =>
                                           ifs(MdParseOut, md_is_indented_code_line_at(text, linecol),
                                             u =>
                                               +grab = md_scan_indented(line <> rest)
                                               +content = md_join_code_lines(md_trim_trailing_empty_lines(string_lines_grab_lines(grab)))
                                               +blockend = string_lines_grab_end(grab)
-                                              +tailout = md_parse_work(f, refs,
-                                                md_lines_after_block(string_lines_grab_rest(grab), seenblock, blankafter, loose))
-                                              md_parse_out_prepend_block(md_make_code_block(content, None{}, start, blockend), tailout)
+                                              md_parse_work(f, refs,
+                                                md_lines_after_block(string_lines_grab_rest(grab), seenblock, blankafter, loose),
+                                                md_make_code_block(content, None{}, start, blockend) <> accblocks, accitems)
                                             u =>
                                               +grab = md_scan_paragraph(rest, line)
                                               +inlinesrc = md_paragraph_inline_source(para_grab_lines(grab))
@@ -4149,12 +4304,12 @@ def md_parse_work(fuel: Nat, +refs: List<&2, RefDef>, work: MdParseWork) -> MdPa
                                               +leaf = ifs(Ast.Block, U32.is_zero(setext),
                                                 v => md_make_paragraph_block(refs, inlinesrc, start, blockend),
                                                 v => md_make_heading_block(refs, setext, inlinesrc, start, blockend))
-                                              +tailout = md_parse_work(f, refs,
-                                                md_lines_after_block(para_grab_rest(grab), seenblock, blankafter, loose))
-                                              md_parse_out_prepend_block(leaf, tailout)))))))))
+                                              md_parse_work(f, refs,
+                                                md_lines_after_block(para_grab_rest(grab), seenblock, blankafter, loose),
+                                                leaf <> accblocks, accitems)))))))))
 
 def md_parse_blocks(fuel: Nat, +refs: List<&2, RefDef>, +lines: List<&2, MdLine>) -> List<&2, Ast.Block>:
-  md_parse_out_blocks(md_parse_work(fuel, refs, md_lines_work(lines)))
+  md_parse_out_blocks(md_parse_work(fuel, refs, md_lines_work(lines), Nil{}, Nil{}))
 
 # Reference-definition stripping/collection.  This is a document-level
 # lexical prepass over top-level lines.  It deliberately knows about the two
@@ -4236,7 +4391,7 @@ def md_blank_prefix_bytes(+s: String, +n: Nat) -> String:
   md_blank_prefix_go(s, n, SNil{})
 
 def md_strip_finish(+chunks: List<&2, String>, +refs: List<&2, RefDef>) -> RefStrip:
-  RefStrip{String.concat(List.reverse(&2, String, chunks)), refs}
+  RefStrip{md_string_concat(List.reverse(&2, String, chunks)), refs}
 
 def md_add_ref_once(+refs: List<&2, RefDef>, +definition: RefDef) -> List<&2, RefDef>:
   ifs(List<&2, RefDef>, md_refs_have_label(refs, ref_def_label(definition)),
@@ -4277,7 +4432,7 @@ def md_strip_refs_go(
 ) -> RefStrip:
   match fuel:
     case 0n:
-      RefStrip{s ++ String.concat(List.reverse(&2, String, chunks)), refs}
+      RefStrip{s ++ md_string_concat(List.reverse(&2, String, chunks)), refs}
     case 1n++f:
       ifs(RefStrip, String.is_empty(s),
         u => md_strip_finish(chunks, refs),
