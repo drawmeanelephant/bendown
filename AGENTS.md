@@ -2,6 +2,8 @@
 
 Bend 2.0.40 is installed at `~/.bend/bin/bend`; it is not on the default PATH in fresh shells.
 
+Runtime/tooling boundary: bendown itself is pure Bend and must not gain a Node.js/npm runtime or implementation dependency. Do not add handwritten JavaScript, `package.json`, npm install steps, or Node-based CLI/tooling. Native compilation/C integration is the supported embedding path. `node` may be used only to execute Bend's generated JavaScript-backend output when explicitly validating that backend (for example `tools/verify_js_stack.sh`); it is not part of the library or normal build/runtime path.
+
 Use these verification commands from the repo root:
 
 ```sh
