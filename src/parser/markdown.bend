@@ -3759,19 +3759,16 @@ def md_strip_list_cont_line(+line: MdLine, +indent: Nat) -> MdLine:
     md_line_lazy(line)}
 
 # Conservative provenance test for the simple open-paragraph case in rule 5
-# (laziness).  It deliberately never reopens a paragraph after another block;
-# nested-container laziness still requires the open-container spine planned
-# for a later milestone.  Lines beginning with `[` are excluded because a
-# reference definition is not a paragraph and container-aware reference
-# scanning is not yet available.
+# (laziness).  It deliberately never reopens a paragraph after another block.
+# Lines that may become reference definitions still count as paragraph lines
+# here because CommonMark determines container structure before extracting
+# reference definitions from accumulated paragraphs.
 def md_initial_plain_paragraph_at(+s: String, +startcol: Nat) -> Bool:
-  +trimmed = md_trim_start(s)
   +htmlkind = md_html_block_kind_at(s, startcol)
   +blockstart = md_is_fence_start_at(s, startcol) || md_is_atx_at(s, startcol) || md_is_thematic_at(s, startcol) ||
     md_is_quote_start_at(s, startcol) || md_is_list_item_at(s, startcol) || Nat.is_ne(htmlkind, 0n)
   Bool.and(Bool.not(Text.blank_line(s)),
-    Bool.and(Bool.not(md_is_indented_code_line_at(s, startcol)),
-      Bool.and(Bool.not(String.starts_with(trimmed, "[")), Bool.not(blockstart))))
+    Bool.and(Bool.not(md_is_indented_code_line_at(s, startcol)), Bool.not(blockstart)))
 
 def md_initial_plain_paragraph(+s: String) -> Bool:
   md_initial_plain_paragraph_at(s, 0n)
@@ -4280,12 +4277,11 @@ def md_parse_work(
 def md_parse_blocks(fuel: Nat, +refs: List<&2, RefDef>, +lines: List<&2, MdLine>) -> List<&2, Ast.Block>:
   md_parse_out_blocks(md_parse_work(fuel, refs, md_lines_work(lines), Nil{}, Nil{}))
 
-# Reference-definition stripping/collection.  This is a document-level
-# lexical prepass over top-level lines.  It deliberately knows about the two
-# block states that most affect definitions: fenced code (definitions inside
-# are literal) and paragraph continuation (definitions cannot interrupt a
-# paragraph).  Container-nested definitions are handled by the block parser's
-# normal fallback as literal text in this milestone.
+# Reference-definition stripping/collection.  Collection traverses the same
+# block-container structure as the parser, then rewrites definition content
+# to same-width whitespace before the normal parse.  This preserves byte
+# positions while ensuring that definitions in code and HTML blocks remain
+# literal and that definitions cannot interrupt an accumulated paragraph.
 type RefStrip is Data:
   RefStrip{text: String, refs: List<&2, RefDef>}
 
@@ -4299,192 +4295,473 @@ def ref_strip_refs(x: RefStrip) -> List<&2, RefDef>:
     case RefStrip{text, refs}:
       refs
 
-type StripState is Data:
-  StripState{inpara: Bool, fencemode: Nat, fencelen: Nat, htmlmode: Nat}
 
-def strip_state_inpara(x: StripState) -> Bool:
+# Blank spans are half-open byte intervals in the newline-normalized source.
+# They cover only content bytes, never the physical line ending; container
+# markers outside the span are therefore preserved exactly.
+type RefBlank is Data:
+  RefBlank{start: U32, end: U32}
+
+def ref_blank_start(x: RefBlank) -> U32:
   match x:
-    case StripState{inpara, fencemode, fencelen, htmlmode}:
-      inpara
+    case RefBlank{start, end}:
+      start
 
-def strip_state_fencemode(x: StripState) -> Nat:
+def ref_blank_end(x: RefBlank) -> U32:
   match x:
-    case StripState{inpara, fencemode, fencelen, htmlmode}:
-      fencemode
+    case RefBlank{start, end}:
+      end
 
-def strip_state_fencelen(x: StripState) -> Nat:
+# Reference collection accumulates blank spans in reverse document order.
+# They are reversed once before being applied to the source.
+type RefScan is Data:
+  RefScan{refs: List<&2, RefDef>, blanks: List<&2, RefBlank>}
+
+def ref_scan_refs(x: RefScan) -> List<&2, RefDef>:
   match x:
-    case StripState{inpara, fencemode, fencelen, htmlmode}:
-      fencelen
+    case RefScan{refs, blanks}:
+      refs
 
-def strip_state_htmlmode(x: StripState) -> Nat:
+def ref_scan_blanks(x: RefScan) -> List<&2, RefBlank>:
   match x:
-    case StripState{inpara, fencemode, fencelen, htmlmode}:
-      htmlmode
-
-# The returned word is the complete physical line including its line ending
-# when one is present; the rest is the following input.
-def md_scan_raw_line_go(s: String, +acc: String) -> WordSplit:
-  match s:
-    case SNil{}:
-      WordSplit{String.reverse(acc), SNil{}}
-    case SCon{'\n', t}:
-      WordSplit{String.reverse(SCon{'\n', acc}), t}
-    case SCon{+h, +t}:
-      md_scan_raw_line_go(t, SCon{h, acc})
-
-def md_scan_raw_line(+s: String) -> WordSplit:
-  md_scan_raw_line_go(s, SNil{})
-
-def md_drop_line_ending(+s: String) -> String:
-  +len = String.length(s)
-  ifs(String, String.ends_with(s, "\n"),
-    u => md_take(s, Nat.sub(len, 1n)),
-    u => s)
-
-
-# Blank a byte-length prefix while preserving both UTF-8 byte length and line
-# structure.  Non-newline Unicode scalar values become one ASCII space per
-# UTF-8 byte, so downstream byte positions are unchanged even though the
-# blanked text is inert whitespace.
-def md_blank_prefix_go(s: String, +n: Nat, +acc: String) -> String:
-  match s:
-    case SNil{}:
-      String.reverse(acc)
-    case SCon{+h, +t}:
-      ifs(String, Nat.is_eq(n, 0n),
-        u => String.reverse(acc),
-        u =>
-          +width = Text.utf8_width(h)
-          +piece = ifs(String, Char.is_eq(h, '\n'),
-            v => "\n",
-            v => md_repeat_char(' ', width))
-          md_blank_prefix_go(t, Nat.sub(n, width), piece ++ acc))
-
-def md_blank_prefix_bytes(+s: String, +n: Nat) -> String:
-  md_blank_prefix_go(s, n, SNil{})
-
-def md_strip_finish(+chunks: List<&2, String>, +refs: List<&2, RefDef>) -> RefStrip:
-  RefStrip{md_string_concat(List.reverse(&2, String, chunks)), refs}
+    case RefScan{refs, blanks}:
+      blanks
 
 def md_add_ref_once(+refs: List<&2, RefDef>, +definition: RefDef) -> List<&2, RefDef>:
   ifs(List<&2, RefDef>, md_refs_have_label(refs, ref_def_label(definition)),
     u => refs,
     u => definition <> refs)
 
-# Fencemode: 0 outside, 1 backtick fence, 2 tilde fence.  Htmlmode is the
-# CommonMark HTML block type number while inside such a block, or 0 outside.
-# Type 1--5 blocks end on their terminator line; type 6/7 blocks end before
-# the next blank line.
-def md_strip_html_continue(+line: String, +htmlmode: Nat) -> Nat:
-  ifs(Nat, Nat.is_le(htmlmode, 5n),
-    u => Bool.pick(Nat, md_html_closed_end(line, htmlmode), 0n, htmlmode),
-    u => Bool.pick(Nat, Text.blank_line(line), 0n, htmlmode))
 
-# Type 7 HTML blocks cannot interrupt a paragraph; types 1--6 can.
-def md_strip_html_start_kind(+line: String, +inpara: Bool) -> Nat:
-  +kind = md_html_block_kind(line)
-  +paragraph_ok = Bool.or(Nat.is_ne(kind, 7n), Bool.not(inpara))
-  +valid = Bool.and(Nat.is_ne(kind, 0n), paragraph_ok)
-  Bool.pick(Nat, valid, kind, 0n)
+# Move the blank spans of one definition (stored in document order) onto the
+# reverse-document-order accumulator.
+def md_ref_scan_add_blanks(xs: List<&2, RefBlank>, +acc: List<&2, RefBlank>) -> List<&2, RefBlank>:
+  match xs:
+    case Nil{}:
+      acc
+    case +h <> +t:
+      md_ref_scan_add_blanks(t, h <> acc)
 
-def md_strip_html_after_start(+line: String, +kind: Nat) -> Nat:
-  ifs(Nat, Nat.is_eq(kind, 0n),
-    u => 0n,
-    u =>
-      ifs(Nat, Nat.is_le(kind, 5n),
-        v => Bool.pick(Nat, md_html_closed_end(line, kind), 0n, kind),
-        v => kind))
+# A flattened view of adjacent container-stripped lines.  The byte positions
+# in that flattened text are piecewise, because container markers and other
+# elided prefixes occupy source bytes but no flattened bytes.
+type RefVirtual is Data:
+  RefVirtual{text: String, segments: List<&2, MdInlineSegment>}
 
-def md_strip_next_state(+line: String, +state: StripState) -> StripState:
-  +mode = strip_state_fencemode(state)
-  +flen = strip_state_fencelen(state)
-  +oldhtml = strip_state_htmlmode(state)
-  ifs(StripState, Nat.is_ne(mode, 0n),
-    u =>
-      +marker = ifs(Char, Nat.is_eq(mode, 1n), v => '`', v => '~')
-      +closes = md_is_fence_close(line, marker, flen)
-      ifs(StripState, closes,
-        v => StripState{False{}, 0n, 0n, oldhtml},
-        v => StripState{False{}, mode, flen, oldhtml}),
-    u =>
-      ifs(StripState, Nat.is_ne(oldhtml, 0n),
-        a => StripState{False{}, 0n, 0n, md_strip_html_continue(line, oldhtml)},
-        a =>
-          +oldinpara = strip_state_inpara(state)
-          +fence = md_is_fence_start(line)
-          +newmode = ifs(Nat, fence,
-            v => Bool.pick(Nat, Char.is_eq(md_fence_marker(line), '`'), 1n, 2n),
-            v => 0n)
-          +newlen = ifs(Nat, fence, v => md_fence_len(line), v => 0n)
-          +blank = Text.blank_line(line)
-          +htmlkind = md_strip_html_start_kind(line, oldinpara)
-          +newhtml = md_strip_html_after_start(line, htmlkind)
-          +blockstart = fence || md_is_atx(line) || md_is_thematic(line) ||
-            md_is_quote_start(line) || md_is_list_item(line) || Nat.is_ne(htmlkind, 0n)
-          +inpara = Bool.and(Bool.not(blank), Bool.not(blockstart))
-          StripState{inpara, newmode, newlen, newhtml}))
-def md_strip_refs_go(
+def ref_virtual_text(x: RefVirtual) -> String:
+  match x:
+    case RefVirtual{text, segments}:
+      text
+
+def ref_virtual_segments(x: RefVirtual) -> List<&2, MdInlineSegment>:
+  match x:
+    case RefVirtual{text, segments}:
+      segments
+
+def md_ref_line_exact(+line: MdLine) -> Bool:
+  +physical = U32.to_nat(U32.sub(md_line_end(line), md_line_start(line)))
+  Nat.is_eq(Text.utf8_length(md_line_text(line)), physical)
+
+# Partial-tab container stripping can insert virtual spaces that have no
+# independent source byte.  Reference collection is conservative for those
+# lines: it declines the candidate rather than inventing inaccurate spans.
+def md_ref_lines_exact(xs: List<&2, MdLine>) -> Bool:
+  match xs:
+    case Nil{}:
+      True{}
+    case +line <> +rest:
+      ifs(Bool, md_ref_line_exact(line),
+        u => md_ref_lines_exact(rest),
+        u => False{})
+
+# Build the flattened reference-candidate text and its segment map.  `dropn`
+# is physical indentation on the first line only.  Each retained line has one
+# virtual LF separator whose endpoint is the physical LF byte at that line's
+# end.  The final line ends at EOF in the flattened view, which the reference
+# scanner treats equivalently to a line ending.
+def md_ref_virtual_go(
+  xs: List<&2, MdLine>,
+  +dropn: Nat,
+  +vpos: Nat,
+  +chunksrev: List<&2, String>,
+  +segsrev: List<&2, MdInlineSegment>
+) -> RefVirtual:
+  match xs:
+    case Nil{}:
+      RefVirtual{md_string_concat(List.reverse(&2, String, chunksrev)),
+        List.reverse(&2, MdInlineSegment, segsrev)}
+    case +line <> +rest:
+      +text = String.drop(md_line_text(line), dropn)
+      +len = Text.utf8_length(text)
+      +original = md_pos_add(md_line_start(line), dropn)
+      +contentseg = md_inline_segment_mk(U32.from_nat(vpos), original)
+      +newlinepos = Nat.add(vpos, len)
+      +last = md_lines_is_empty(rest)
+      ifs(RefVirtual, last,
+        u => RefVirtual{md_string_concat(List.reverse(&2, String, text <> chunksrev)),
+          List.reverse(&2, MdInlineSegment, contentseg <> segsrev)},
+        u =>
+          +newlineseg = md_inline_segment_mk(U32.from_nat(newlinepos), md_line_end(line))
+          +linechunk = text ++ "\n"
+          md_ref_virtual_go(rest, 0n, Nat.add(newlinepos, 1n),
+            linechunk <> chunksrev, newlineseg <> contentseg <> segsrev))
+
+def md_ref_virtual(+xs: List<&2, MdLine>, +dropn: Nat) -> RefVirtual:
+  md_ref_virtual_go(xs, dropn, 0n, Nil{}, Nil{})
+
+# Blanking result for one definition.  `rest` is the first unconsumed input
+# line; blanks are in document order.
+type RefBlankCount is Data:
+  RefBlankCount{blanks: List<&2, RefBlank>, rest: List<&2, MdLine>}
+
+def ref_blank_count_blanks(x: RefBlankCount) -> List<&2, RefBlank>:
+  match x:
+    case RefBlankCount{blanks, rest}:
+      blanks
+
+def ref_blank_count_rest(x: RefBlankCount) -> List<&2, MdLine>:
+  match x:
+    case RefBlankCount{blanks, rest}:
+      rest
+
+# Valid definitions consume complete physical content lines: trailing spaces
+# are part of the definition scan, while any other trailing byte would make
+# the candidate invalid.  Consequently every consumed line can be blanked as
+# a whole after container prefixes.  Newline bytes are outside every span.
+def md_blank_ref_lines_go(
+  xs: List<&2, MdLine>,
+  +dropn: Nat,
+  +left: Nat,
+  +acc: List<&2, RefBlank>
+) -> RefBlankCount:
+  match xs:
+    case Nil{}:
+      RefBlankCount{List.reverse(&2, RefBlank, acc), Nil{}}
+    case +line <> +rest:
+      ifs(RefBlankCount, Nat.is_eq(left, 0n),
+        u => RefBlankCount{List.reverse(&2, RefBlank, acc), line <> rest},
+        u =>
+          +textlen = Text.utf8_length(md_line_text(line))
+          +len = Nat.sub(textlen, dropn)
+          +blank : RefBlank = RefBlank{md_line_start(line), md_line_end(line)}
+          ifs(RefBlankCount, Nat.is_le(left, len),
+            v => RefBlankCount{List.reverse(&2, RefBlank, blank <> acc), rest},
+            v => md_blank_ref_lines_go(rest, 0n, Nat.sub(left, Nat.add(len, 1n)), blank <> acc)))
+
+def md_blank_ref_lines(+xs: List<&2, MdLine>, +dropn: Nat, +consumed: Nat) -> RefBlankCount:
+  md_blank_ref_lines_go(xs, dropn, consumed, Nil{})
+
+# A successful scan over one or more container-stripped lines.
+type RefLinesHit is Data:
+  RefLinesHit{definition: RefDef, blanks: List<&2, RefBlank>, rest: List<&2, MdLine>}
+
+def ref_lines_hit_definition(x: RefLinesHit) -> RefDef:
+  match x:
+    case RefLinesHit{definition, blanks, rest}:
+      definition
+
+def ref_lines_hit_blanks(x: RefLinesHit) -> List<&2, RefBlank>:
+  match x:
+    case RefLinesHit{definition, blanks, rest}:
+      blanks
+
+def ref_lines_hit_rest(x: RefLinesHit) -> List<&2, MdLine>:
+  match x:
+    case RefLinesHit{definition, blanks, rest}:
+      rest
+
+# Move reference destination/definition spans from flattened coordinates to
+# normalized-source coordinates.  The semantic strings are unchanged.
+def md_ref_def_respan(+definition: RefDef, +segs: List<&2, MdInlineSegment>) -> RefDef:
+  RefDef{ref_def_label(definition), ref_def_href(definition),
+    ref_def_logical_href(definition), ref_def_raw_href(definition),
+    ref_def_title(definition),
+    md_inline_segment_span(segs, ref_def_destination_span(definition)),
+    md_inline_segment_span(segs, ref_def_definition_span(definition))}
+
+# Scan a reference definition at the start of a sequence of lines belonging
+# to one accumulated paragraph.  The sequence has already been confined by
+# the block scanner, so a multiline title cannot cross a blank line or a
+# block interrupt.  Up to three columns of initial indentation are allowed;
+# those bytes are blanked with the definition but are not part of its span.
+def md_scan_ref_in_lines(+xs: List<&2, MdLine>) -> Maybe<&2, RefLinesHit>:
+  match xs:
+    case Nil{}:
+      None{}
+    case +line <> +rest:
+      +text = md_line_text(line)
+      +indentscan = md_scan_indent_from(text, md_line_col(line))
+      +indentcols = md_indent_scan_cols(indentscan)
+      +indentchars = md_indent_scan_chars(indentscan)
+      +afterindent = String.drop(text, indentchars)
+      +candidate = Bool.and(Nat.is_le(indentcols, 3n), String.starts_with(afterindent, "["))
+      ifs(Maybe<&2, RefLinesHit>, candidate,
+        u =>
+          +virtual = md_ref_virtual(xs, indentchars)
+          maybe_case(RefHit, Maybe<&2, RefLinesHit>,
+            md_scan_reference_definition_at(ref_virtual_text(virtual), 0),
+            +hit =>
+              +segs = ref_virtual_segments(virtual)
+              +mapped = md_ref_def_respan(ref_hit_def(hit), segs)
+              +blanked = md_blank_ref_lines(xs, indentchars, ref_hit_consumed(hit))
+              +hitrest = ref_blank_count_rest(blanked)
+              +alllen = md_list_length(&2, MdLine, xs)
+              +restlen = md_list_length(&2, MdLine, hitrest)
+              +consumedlines = Nat.sub(alllen, restlen)
+              +consumedexact = md_ref_lines_exact(md_list_take(&2, MdLine, xs, consumedlines))
+              ifs(Maybe<&2, RefLinesHit>, consumedexact,
+                v => Some{RefLinesHit{mapped, ref_blank_count_blanks(blanked), hitrest}},
+                v => None{}),
+            v => None{}),
+        u => None{})
+
+# Leading-reference scan for one accumulated paragraph.  Scanning stops at
+# the first line that is not a complete definition; that line and everything
+# after it is ordinary paragraph content, so later apparent definitions in
+# the same paragraph cannot interrupt it.
+type ParaRefScan is Data:
+  ParaRefScan{refs: List<&2, RefDef>, blanks: List<&2, RefBlank>,
+    remaining: List<&2, MdLine>, scanned: Nat}
+
+def para_ref_scan_refs(x: ParaRefScan) -> List<&2, RefDef>:
+  match x:
+    case ParaRefScan{refs, blanks, remaining, scanned}:
+      refs
+
+def para_ref_scan_blanks(x: ParaRefScan) -> List<&2, RefBlank>:
+  match x:
+    case ParaRefScan{refs, blanks, remaining, scanned}:
+      blanks
+
+def para_ref_scan_remaining(x: ParaRefScan) -> List<&2, MdLine>:
+  match x:
+    case ParaRefScan{refs, blanks, remaining, scanned}:
+      remaining
+
+def para_ref_scan_scanned(x: ParaRefScan) -> Nat:
+  match x:
+    case ParaRefScan{refs, blanks, remaining, scanned}:
+      scanned
+
+def md_para_refs_go(
   fuel: Nat,
-  +s: String,
-  +chunks: List<&2, String>,
+  +xs: List<&2, MdLine>,
   +refs: List<&2, RefDef>,
-  +state: StripState,
-  +pos: U32
-) -> RefStrip:
+  +blanks: List<&2, RefBlank>,
+  +scanned: Nat
+) -> ParaRefScan:
   match fuel:
     case 0n:
-      RefStrip{s ++ md_string_concat(List.reverse(&2, String, chunks)), refs}
+      ParaRefScan{refs, blanks, xs, scanned}
     case 1n++f:
-      ifs(RefStrip, String.is_empty(s),
-        u => md_strip_finish(chunks, refs),
-        u =>
-          +rawline = md_scan_raw_line(s)
-          +linefull = word_split_word(rawline)
-          +afterline = word_split_rest(rawline)
-          +line = md_drop_line_ending(linefull)
-          +inpara = strip_state_inpara(state)
-          +fencemode = strip_state_fencemode(state)
-          +htmlmode = strip_state_htmlmode(state)
-          +indent = md_marker_indent(line)
-          +indentchars = md_marker_indent_chars_at(line, 0n)
-          +candstart = Nat.is_le(indent, 3n) && String.starts_with(String.drop(line, indentchars), "[")
-          +clearstate = Bool.and(Bool.not(inpara),
-            Bool.and(Nat.is_eq(fencemode, 0n), Nat.is_eq(htmlmode, 0n)))
-          +cand = Bool.and(candstart, clearstate)
-          +defsrc = String.drop(s, indentchars)
-          +defbase = md_pos_add(pos, indentchars)
-          +defhit = ifs(Maybe<&2, RefHit>, cand,
-            v => md_scan_reference_definition_at(defsrc, defbase),
-            v => None{})
-          maybe_case(RefHit, RefStrip, defhit,
+      match xs:
+        case Nil{}:
+          ParaRefScan{refs, blanks, Nil{}, scanned}
+        case line <> rest:
+          maybe_case(RefLinesHit, ParaRefScan, md_scan_ref_in_lines(xs),
             +hit =>
-              +defrest = ref_hit_rest(hit)
-              +defconsumed = ref_hit_consumed(hit)
-              +hasnewline = String.starts_with(defrest, "\n")
-              +nextinput = ifs(String, hasnewline,
-                v => String.drop(defrest, 1n),
-                v => defrest)
-              +afterdef = md_pos_add(defbase, defconsumed)
-              +nextpos = ifs(U32, hasnewline,
-                v => md_pos_add(afterdef, 1n),
-                v => afterdef)
-              +blankbody = md_blank_prefix_bytes(defsrc, defconsumed)
-              +blankline = ifs(String, hasnewline,
-                v => blankbody ++ "\n",
-                v => blankbody)
-              +blanked = md_repeat_char(' ', indentchars) ++ blankline
-              +newrefs = md_add_ref_once(refs, ref_hit_def(hit))
-              md_strip_refs_go(f, nextinput, blanked <> chunks, newrefs,
-                StripState{False{}, fencemode, strip_state_fencelen(state), htmlmode}, nextpos),
-            v =>
-              +newstate = md_strip_next_state(line, state)
-              +linepos = md_pos_add_text(pos, linefull)
-              md_strip_refs_go(f, afterline, linefull <> chunks, refs, newstate, linepos)))
+              +newblanks = md_ref_scan_add_blanks(ref_lines_hit_blanks(hit), blanks)
+              +newrefs = md_add_ref_once(refs, ref_lines_hit_definition(hit))
+              md_para_refs_go(f, ref_lines_hit_rest(hit), newrefs, newblanks, 1n+scanned),
+            v => ParaRefScan{refs, blanks, xs, scanned})
+
+def md_scan_paragraph_refs(
+  +xs: List<&2, MdLine>,
+  +refs: List<&2, RefDef>,
+  +blanks: List<&2, RefBlank>
+) -> ParaRefScan:
+  +len = md_list_length(&2, MdLine, xs)
+  md_para_refs_go(Nat.add(len, 2n), xs, refs, blanks, 0n)
+
+# Collection traversal mirrors the block parser's own container extraction.
+# Unlike the parser dispatcher, it emits no AST and descends only to find
+# accumulated paragraphs whose leading text can contain definitions.
+type RefCollectWork is Data:
+  RefWorkLines{lines: List<&2, MdLine>}
+  RefWorkItems{items: List<&2, MdRawItem>}
+
+# After a false setext candidate, reparse the underline as ordinary paragraph
+# content and return the first line after the enlarged paragraph.  A setext
+# line is false when every preceding line was consumed as a reference
+# definition: removing those lines leaves no paragraph content for it to
+# underline.
+def md_false_setext_rest(+afterpre: List<&2, MdLine>, +fallback: List<&2, MdLine>) -> List<&2, MdLine>:
+  match afterpre:
+    case Nil{}:
+      fallback
+    case +underline <> +afterunderline:
+      +contgrab = md_scan_paragraph(afterunderline, underline)
+      para_grab_rest(contgrab)
+
+def md_collect_refs_work(
+  fuel: Nat,
+  +refs: List<&2, RefDef>,
+  +blanks: List<&2, RefBlank>,
+  work: RefCollectWork
+) -> RefScan:
+  match fuel:
+    case 0n:
+      RefScan{refs, blanks}
+    case 1n++f:
+      match work:
+        case RefWorkItems{items}:
+          match items:
+            case Nil{}:
+              RefScan{refs, blanks}
+            case +item <> restitems:
+              +inner = md_collect_refs_work(f, refs, blanks,
+                RefWorkLines{md_raw_item_lines(item)})
+              md_collect_refs_work(f, ref_scan_refs(inner), ref_scan_blanks(inner),
+                RefWorkItems{restitems})
+        case RefWorkLines{lines}:
+          match lines:
+            case Nil{}:
+              RefScan{refs, blanks}
+            case +line <> +rest:
+              +text = md_line_text(line)
+              +linecol = md_line_col(line)
+              +htmlkind = md_html_block_kind_at(text, linecol)
+              ifs(RefScan, Text.blank_line(text),
+                u => md_collect_refs_work(f, refs, blanks, RefWorkLines{rest}),
+                u =>
+                  ifs(RefScan, Nat.is_ne(htmlkind, 0n),
+                    u =>
+                      +grab = md_scan_html_block(line <> rest, htmlkind)
+                      md_collect_refs_work(f, refs, blanks,
+                        RefWorkLines{string_lines_grab_rest(grab)}),
+                    u =>
+                      ifs(RefScan, md_is_fence_start_at(text, linecol),
+                        u =>
+                          +marker = md_fence_marker_at(text, linecol)
+                          +flen = md_fence_len_at(text, linecol)
+                          +openindent = md_marker_indent_at(text, linecol)
+                          +grab = md_scan_fenced(rest, marker, flen, openindent, md_line_end(line))
+                          md_collect_refs_work(f, refs, blanks,
+                            RefWorkLines{string_lines_grab_rest(grab)}),
+                        u =>
+                          ifs(RefScan, md_is_atx_at(text, linecol),
+                            u => md_collect_refs_work(f, refs, blanks, RefWorkLines{rest}),
+                            u =>
+                              ifs(RefScan, md_is_thematic_at(text, linecol),
+                                u => md_collect_refs_work(f, refs, blanks, RefWorkLines{rest}),
+                                u =>
+                                  ifs(RefScan, md_is_quote_start_at(text, linecol),
+                                    u =>
+                                      +grab = md_scan_quote(line <> rest)
+                                      +inner = md_collect_refs_work(f, refs, blanks,
+                                        RefWorkLines{lines_grab_lines(grab)})
+                                      md_collect_refs_work(f, ref_scan_refs(inner), ref_scan_blanks(inner),
+                                        RefWorkLines{lines_grab_rest(grab)}),
+                                    u =>
+                                      ifs(RefScan, md_is_list_item_at(text, linecol),
+                                        u =>
+                                          +minfo = md_scan_list_marker_info_at(text, linecol)
+                                          +ordered = mlmi_ordered(minfo)
+                                          +grab = md_scan_raw_list(line <> rest, ordered)
+                                          +inner = md_collect_refs_work(f, refs, blanks,
+                                            RefWorkItems{md_raw_list_grab_items(grab)})
+                                          md_collect_refs_work(f, ref_scan_refs(inner), ref_scan_blanks(inner),
+                                            RefWorkLines{md_raw_list_grab_rest(grab)}),
+                                        u =>
+                                          ifs(RefScan, md_is_indented_code_line_at(text, linecol),
+                                            u =>
+                                              +grab = md_scan_indented(line <> rest)
+                                              md_collect_refs_work(f, refs, blanks,
+                                                RefWorkLines{string_lines_grab_rest(grab)}),
+                                            u =>
+                                              +grab = md_scan_paragraph(rest, line)
+                                              +parascan = md_scan_paragraph_refs(para_grab_lines(grab), refs, blanks)
+                                              +newrefs = para_ref_scan_refs(parascan)
+                                              +newblanks = para_ref_scan_blanks(parascan)
+                                              +remaining = para_ref_scan_remaining(parascan)
+                                              +scanned = para_ref_scan_scanned(parascan)
+                                              +setext = para_grab_setext(grab)
+                                              +allrefs = Bool.and(Nat.is_le(1n, scanned), md_lines_is_empty(remaining))
+                                              +falsesetext = Bool.and(Bool.not(U32.is_zero(setext)), allrefs)
+                                              +inputlines : List<&2, MdLine> = line <> rest
+                                              +prelen = md_list_length(&2, MdLine, para_grab_lines(grab))
+                                              +afterpre = md_list_drop(&2, MdLine, inputlines, prelen)
+                                              +continuerest = ifs(List<&2, MdLine>, falsesetext,
+                                                v => md_false_setext_rest(afterpre, para_grab_rest(grab)),
+                                                v => para_grab_rest(grab))
+                                              md_collect_refs_work(f, newrefs, newblanks,
+                                                RefWorkLines{continuerest})))))))))
+
+# Blank-span application cursor: expired spans are discarded at the
+# front, then the first remaining span is the only one that can contain the
+# current byte because spans are produced in ascending order.
+type BlankCursor is Data:
+  BlankCursor{inside: Bool, blanks: List<&2, RefBlank>}
+
+def blank_cursor_inside(x: BlankCursor) -> Bool:
+  match x:
+    case BlankCursor{inside, blanks}:
+      inside
+
+def blank_cursor_blanks(x: BlankCursor) -> List<&2, RefBlank>:
+  match x:
+    case BlankCursor{inside, blanks}:
+      blanks
+
+def md_blank_cursor(xs: List<&2, RefBlank>, +pos: U32) -> BlankCursor:
+  match xs:
+    case Nil{}:
+      BlankCursor{False{}, Nil{}}
+    case +h <> +t:
+      ifs(BlankCursor, U32.is_le(ref_blank_end(h), pos),
+        u => md_blank_cursor(t, pos),
+        u =>
+          +inside = Bool.and(U32.is_le(ref_blank_start(h), pos), U32.is_lt(pos, ref_blank_end(h)))
+          BlankCursor{inside, h <> t})
+
+# Rewrite only bytes covered by reference-definition content spans.  Each
+# UTF-8 byte becomes one ASCII space, except line endings, so the output has
+# exactly the input's byte length and physical line structure.
+def md_apply_blank_spans_go(
+  fuel: Nat,
+  +s: String,
+  +pos: U32,
+  +blanks: List<&2, RefBlank>,
+  +acc: String
+) -> String:
+  match fuel:
+    case 0n:
+      String.reverse(acc) ++ s
+    case 1n++f:
+      match s:
+        case SNil{}:
+          String.reverse(acc)
+        case SCon{+h, +t}:
+          +width = Text.utf8_width(h)
+          +cursor = md_blank_cursor(blanks, pos)
+          +blankit = Bool.and(blank_cursor_inside(cursor), Bool.not(Char.is_eq(h, '\n')))
+          +piece = ifs(String, blankit,
+            u => md_repeat_char(' ', width),
+            u => md_char_string(h))
+          md_apply_blank_spans_go(f, t, md_pos_add(pos, width),
+            blank_cursor_blanks(cursor), piece ++ acc)
+
+def md_apply_blank_spans(+source: String, +spans: List<&2, RefBlank>) -> String:
+  +len = Text.utf8_length(source)
+  md_apply_blank_spans_go(Nat.add(len, 4n), source, 0, spans, SNil{})
+
+# Collect definitions by traversing the same block structure that the parser
+# will later consume.  This is intentionally structural rather than a line
+# prefix heuristic: definitions inside fences, indented code, and HTML blocks
+# are literal at every container depth, while definitions cannot interrupt an
+# already open paragraph.
+def md_collect_reference_spans(+source: String) -> RefScan:
+  +rawlines = md_lines(source)
+  +lines = md_make_lines(md_drop_final_empty(rawlines), 0n)
+  +len = Text.utf8_length(source)
+  +fuel = Nat.add(Nat.mul(8n, len), 16n)
+  md_collect_refs_work(fuel, Nil{}, Nil{}, RefWorkLines{lines})
 
 def md_strip_reference_definitions(+source: String) -> RefStrip:
-  +len = Text.utf8_length(source)
-  md_strip_refs_go(Nat.add(len, 4n), source, Nil{}, Nil{}, StripState{False{}, 0n, 0n, 0n}, 0)
+  +scan = md_collect_reference_spans(source)
+  +forwardblanks = List.reverse(&2, RefBlank, ref_scan_blanks(scan))
+  +text = md_apply_blank_spans(source, forwardblanks)
+  RefStrip{text, ref_scan_refs(scan)}
 
 # Build the line table and parse the normalized input.  Fuel is proportional
 # to input bytes; blank-only lines still consume one fuel and there is slack

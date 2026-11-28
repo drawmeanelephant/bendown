@@ -64,4 +64,7 @@ def main() -> IO(Unit):
     Unit <- expect_equal("crlf-quote-continuation-document-link-original-spans",
       "8-22|dest=Some(12-21)|def=None",
       show_mapped_first_input("> aa\r\n> [x](target.md)\r\n"))
+    Unit <- expect_equal("crlf-blockquote-reference-document-link-original-spans",
+      "0-8|dest=Some(19-21)|def=Some(14-21)",
+      show_mapped_first_input("[use][x]\r\n\r\n> [x]: /u\r\n"))
     IO.print("source map smoke: all checks passed")

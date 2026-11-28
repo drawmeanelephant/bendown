@@ -160,4 +160,19 @@ def main() -> IO(Unit):
     Unit <- expect_equal("reference-after-html-block-still-works",
       "\"/url\"|raw=Some(\"/url\")|logical=Some(\"/url\")|use=20-23|dest=Some(14-18)|def=Some(9-18)",
       show_first("<div>\nx\n\n[x]: /url\n\n[x]\n"))
+    Unit <- expect_equal("blockquote-reference-provenance",
+      "\"/u\"|raw=Some(\"/u\")|logical=Some(\"/u\")|use=0-8|dest=Some(17-19)|def=Some(12-19)",
+      show_first("[use][x]\n\n> [x]: /u\n"))
+    Unit <- expect_equal("list-reference-provenance",
+      "\"/u\"|raw=Some(\"/u\")|logical=Some(\"/u\")|use=0-8|dest=Some(17-19)|def=Some(12-19)",
+      show_first("[use][x]\n\n- [x]: /u\n"))
+    Unit <- expect_equal("nested-blockquote-reference-provenance",
+      "\"/u\"|raw=Some(\"/u\")|logical=Some(\"/u\")|use=0-8|dest=Some(19-21)|def=Some(14-21)",
+      show_first("[use][x]\n\n> > [x]: /u\n"))
+    Unit <- expect_equal("blockquote-multiline-reference-provenance",
+      "\"/u\"|raw=Some(\"/u\")|logical=Some(\"/u\")|use=0-8|dest=Some(17-19)|def=Some(12-27)",
+      show_first("[use][x]\n\n> [x]: /u\n>   \"t\"\n"))
+    Unit <- expect_equal("blockquote-next-line-destination-provenance",
+      "\"/u\"|raw=Some(\"/u\")|logical=Some(\"/u\")|use=0-8|dest=Some(19-21)|def=Some(12-21)",
+      show_first("[use][x]\n\n> [x]:\n> /u\n"))
     IO.print("document link provenance smoke: all checks passed")
