@@ -21,6 +21,7 @@ run_bend() {
 
 run_bend PROOF.bend
 run_bend test/markdown_smoke.bend
+run_bend test/html_entities_smoke.bend
 run_bend test/textile_smoke.bend
 run_bend test/render_smoke.bend
 run_bend test/render_link_rewrite_smoke.bend

@@ -2,6 +2,7 @@ import Base
 import ../ast.bend as Ast
 import ../text.bend as Text
 import ../unicode.bend as Unicode
+import ../html_entities.bend as HtmlEntities
 
 # Clean-room Markdown parser, first milestone.
 #
@@ -374,50 +375,11 @@ def md_scan_entity_name(s: String, +acc: String, +count: Nat) -> WordSplit:
         u => md_scan_entity_name(t, SCon{h, acc}, 1n+count),
         u => WordSplit{String.reverse(acc), SCon{h, t}})
 
-# The HTML5 entity table is large; this clean-room implementation includes
-# every named reference exercised by the official CommonMark examples, plus
-# the common references needed by its link examples.  Unknown names remain
-# literal, as required for nonentities.
+# HTML5 named entities are generated from the authoritative table referenced
+# by the CommonMark specification.  Unknown names remain literal, as required
+# for nonentities.
 def md_named_entity_value(+name: String) -> Maybe<&2, String>:
-  ifs(Maybe<&2, String>, String.eq(name, "nbsp"),
-    u => Some{md_unicode1(160)},
-    u =>
-      ifs(Maybe<&2, String>, String.eq(name, "amp"),
-        v => Some{md_unicode1(38)},
-        v =>
-          ifs(Maybe<&2, String>, String.eq(name, "copy"),
-            w => Some{md_unicode1(169)},
-            w =>
-              ifs(Maybe<&2, String>, String.eq(name, "AElig"),
-                a => Some{md_unicode1(198)},
-                a =>
-                  ifs(Maybe<&2, String>, String.eq(name, "Dcaron"),
-                    b => Some{md_unicode1(270)},
-                    b =>
-                      ifs(Maybe<&2, String>, String.eq(name, "frac34"),
-                        c => Some{md_unicode1(190)},
-                        c =>
-                          ifs(Maybe<&2, String>, String.eq(name, "HilbertSpace"),
-                            d => Some{md_unicode1(8459)},
-                            d =>
-                              ifs(Maybe<&2, String>, String.eq(name, "DifferentialD"),
-                                e => Some{md_unicode1(8518)},
-                                e =>
-                                  ifs(Maybe<&2, String>, String.eq(name, "ClockwiseContourIntegral"),
-                                    g => Some{md_unicode1(8754)},
-                                    g =>
-                                      ifs(Maybe<&2, String>, String.eq(name, "ngE"),
-                                        h => Some{md_unicode1(8807) ++ md_unicode1(824)},
-                                        h =>
-                                          ifs(Maybe<&2, String>, String.eq(name, "ouml"),
-                                            i => Some{md_unicode1(246)},
-                                            i =>
-                                              ifs(Maybe<&2, String>, String.eq(name, "auml"),
-                                                j => Some{md_unicode1(228)},
-                                                j =>
-                                                  ifs(Maybe<&2, String>, String.eq(name, "quot"),
-                                                    k => Some{md_unicode1(34)},
-                                                    k => None{})))))))))))))
+  HtmlEntities.html5_named_entity_value(name)
 
 def md_scan_named_entity(+s: String) -> Maybe<&2, EntityHit>:
   +parts = md_scan_entity_name(s, SNil{}, 0n)

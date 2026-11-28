@@ -76,6 +76,9 @@ def main() -> IO(Unit):
     Unit <- expect_equal("entity-destination-provenance",
       "\"a&b.md\"|raw=Some(\"a&amp;b.md\")|logical=Some(\"a&b.md\")|use=0-20|dest=Some(9-19)|def=None",
       show_first("[Entity](a&amp;b.md)"))
+    Unit <- expect_equal("html5-named-entity-destination-provenance",
+      "\"a%E2%80%A6b.md\"|raw=Some(\"a&hellip;b.md\")|logical=Some(\"a…b.md\")|use=0-18|dest=Some(4-17)|def=None",
+      show_first("[x](a&hellip;b.md)"))
     Unit <- expect_equal("unicode-angle-destination-provenance",
       "\"%C3%A9.md\"|raw=Some(\"<é.md>\")|logical=Some(\"é.md\")|use=0-24|dest=Some(16-23)|def=None",
       show_first("[Unicode angle](<é.md>)"))
