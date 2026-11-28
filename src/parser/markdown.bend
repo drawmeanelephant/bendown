@@ -4300,22 +4300,27 @@ def ref_strip_refs(x: RefStrip) -> List<&2, RefDef>:
       refs
 
 type StripState is Data:
-  StripState{inpara: Bool, fencemode: Nat, fencelen: Nat}
+  StripState{inpara: Bool, fencemode: Nat, fencelen: Nat, htmlmode: Nat}
 
 def strip_state_inpara(x: StripState) -> Bool:
   match x:
-    case StripState{inpara, fencemode, fencelen}:
+    case StripState{inpara, fencemode, fencelen, htmlmode}:
       inpara
 
 def strip_state_fencemode(x: StripState) -> Nat:
   match x:
-    case StripState{inpara, fencemode, fencelen}:
+    case StripState{inpara, fencemode, fencelen, htmlmode}:
       fencemode
 
 def strip_state_fencelen(x: StripState) -> Nat:
   match x:
-    case StripState{inpara, fencemode, fencelen}:
+    case StripState{inpara, fencemode, fencelen, htmlmode}:
       fencelen
+
+def strip_state_htmlmode(x: StripState) -> Nat:
+  match x:
+    case StripState{inpara, fencemode, fencelen, htmlmode}:
+      htmlmode
 
 # The returned word is the complete physical line including its line ending
 # when one is present; the rest is the following input.
@@ -4367,30 +4372,58 @@ def md_add_ref_once(+refs: List<&2, RefDef>, +definition: RefDef) -> List<&2, Re
     u => refs,
     u => definition <> refs)
 
-# Fencemode: 0 outside, 1 backtick fence, 2 tilde fence.
+# Fencemode: 0 outside, 1 backtick fence, 2 tilde fence.  Htmlmode is the
+# CommonMark HTML block type number while inside such a block, or 0 outside.
+# Type 1--5 blocks end on their terminator line; type 6/7 blocks end before
+# the next blank line.
+def md_strip_html_continue(+line: String, +htmlmode: Nat) -> Nat:
+  ifs(Nat, Nat.is_le(htmlmode, 5n),
+    u => Bool.pick(Nat, md_html_closed_end(line, htmlmode), 0n, htmlmode),
+    u => Bool.pick(Nat, Text.blank_line(line), 0n, htmlmode))
+
+# Type 7 HTML blocks cannot interrupt a paragraph; types 1--6 can.
+def md_strip_html_start_kind(+line: String, +inpara: Bool) -> Nat:
+  +kind = md_html_block_kind(line)
+  +paragraph_ok = Bool.or(Nat.is_ne(kind, 7n), Bool.not(inpara))
+  +valid = Bool.and(Nat.is_ne(kind, 0n), paragraph_ok)
+  Bool.pick(Nat, valid, kind, 0n)
+
+def md_strip_html_after_start(+line: String, +kind: Nat) -> Nat:
+  ifs(Nat, Nat.is_eq(kind, 0n),
+    u => 0n,
+    u =>
+      ifs(Nat, Nat.is_le(kind, 5n),
+        v => Bool.pick(Nat, md_html_closed_end(line, kind), 0n, kind),
+        v => kind))
+
 def md_strip_next_state(+line: String, +state: StripState) -> StripState:
   +mode = strip_state_fencemode(state)
   +flen = strip_state_fencelen(state)
+  +oldhtml = strip_state_htmlmode(state)
   ifs(StripState, Nat.is_ne(mode, 0n),
     u =>
       +marker = ifs(Char, Nat.is_eq(mode, 1n), v => '`', v => '~')
       +closes = md_is_fence_close(line, marker, flen)
       ifs(StripState, closes,
-        v => StripState{False{}, 0n, 0n},
-        v => StripState{False{}, mode, flen}),
+        v => StripState{False{}, 0n, 0n, oldhtml},
+        v => StripState{False{}, mode, flen, oldhtml}),
     u =>
-      +fence = md_is_fence_start(line)
-      +newmode = ifs(Nat, fence,
-        v => Bool.pick(Nat, Char.is_eq(md_fence_marker(line), '`'), 1n, 2n),
-        v => 0n)
-      +newlen = ifs(Nat, fence, v => md_fence_len(line), v => 0n)
-      +blank = Text.blank_line(line)
-      +htmlkind = md_html_block_kind(line)
-      +blockstart = fence || md_is_atx(line) || md_is_thematic(line) ||
-        md_is_quote_start(line) || md_is_list_item(line) || Nat.is_ne(htmlkind, 0n)
-      +inpara = Bool.and(Bool.not(blank), Bool.not(blockstart))
-      StripState{inpara, newmode, newlen})
-
+      ifs(StripState, Nat.is_ne(oldhtml, 0n),
+        a => StripState{False{}, 0n, 0n, md_strip_html_continue(line, oldhtml)},
+        a =>
+          +oldinpara = strip_state_inpara(state)
+          +fence = md_is_fence_start(line)
+          +newmode = ifs(Nat, fence,
+            v => Bool.pick(Nat, Char.is_eq(md_fence_marker(line), '`'), 1n, 2n),
+            v => 0n)
+          +newlen = ifs(Nat, fence, v => md_fence_len(line), v => 0n)
+          +blank = Text.blank_line(line)
+          +htmlkind = md_strip_html_start_kind(line, oldinpara)
+          +newhtml = md_strip_html_after_start(line, htmlkind)
+          +blockstart = fence || md_is_atx(line) || md_is_thematic(line) ||
+            md_is_quote_start(line) || md_is_list_item(line) || Nat.is_ne(htmlkind, 0n)
+          +inpara = Bool.and(Bool.not(blank), Bool.not(blockstart))
+          StripState{inpara, newmode, newlen, newhtml}))
 def md_strip_refs_go(
   fuel: Nat,
   +s: String,
@@ -4412,10 +4445,13 @@ def md_strip_refs_go(
           +line = md_drop_line_ending(linefull)
           +inpara = strip_state_inpara(state)
           +fencemode = strip_state_fencemode(state)
+          +htmlmode = strip_state_htmlmode(state)
           +indent = md_marker_indent(line)
           +indentchars = md_marker_indent_chars_at(line, 0n)
           +candstart = Nat.is_le(indent, 3n) && String.starts_with(String.drop(line, indentchars), "[")
-          +cand = Bool.and(candstart, Bool.and(Bool.not(inpara), Nat.is_eq(fencemode, 0n)))
+          +clearstate = Bool.and(Bool.not(inpara),
+            Bool.and(Nat.is_eq(fencemode, 0n), Nat.is_eq(htmlmode, 0n)))
+          +cand = Bool.and(candstart, clearstate)
           +defsrc = String.drop(s, indentchars)
           +defbase = md_pos_add(pos, indentchars)
           +defhit = ifs(Maybe<&2, RefHit>, cand,
@@ -4440,7 +4476,7 @@ def md_strip_refs_go(
               +blanked = md_repeat_char(' ', indentchars) ++ blankline
               +newrefs = md_add_ref_once(refs, ref_hit_def(hit))
               md_strip_refs_go(f, nextinput, blanked <> chunks, newrefs,
-                StripState{False{}, fencemode, strip_state_fencelen(state)}, nextpos),
+                StripState{False{}, fencemode, strip_state_fencelen(state), htmlmode}, nextpos),
             v =>
               +newstate = md_strip_next_state(line, state)
               +linepos = md_pos_add_text(pos, linefull)
@@ -4448,7 +4484,7 @@ def md_strip_refs_go(
 
 def md_strip_reference_definitions(+source: String) -> RefStrip:
   +len = Text.utf8_length(source)
-  md_strip_refs_go(Nat.add(len, 4n), source, Nil{}, Nil{}, StripState{False{}, 0n, 0n}, 0)
+  md_strip_refs_go(Nat.add(len, 4n), source, Nil{}, Nil{}, StripState{False{}, 0n, 0n, 0n}, 0)
 
 # Build the line table and parse the normalized input.  Fuel is proportional
 # to input bytes; blank-only lines still consume one fuel and there is slack

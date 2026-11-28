@@ -151,4 +151,13 @@ def main() -> IO(Unit):
     Unit <- expect_equal("empty-angle-reference-provenance",
       "\"\"|raw=Some(\"<>\")|logical=Some(\"\")|use=9-17|dest=Some(5-7)|def=Some(0-7)",
       show_first("[x]: <>\n\n[use][x]"))
+    Unit <- expect_equal("html-block-literal-is-not-reference",
+      "missing",
+      show_first("<div>\n[x]: /url\n\n[x]\n"))
+    Unit <- expect_equal("closed-html-block-literal-is-not-reference",
+      "missing",
+      show_first("<script>\n[x]: /url\n</script>\n\n[x]\n"))
+    Unit <- expect_equal("reference-after-html-block-still-works",
+      "\"/url\"|raw=Some(\"/url\")|logical=Some(\"/url\")|use=20-23|dest=Some(14-18)|def=Some(9-18)",
+      show_first("<div>\nx\n\n[x]: /url\n\n[x]\n"))
     IO.print("document link provenance smoke: all checks passed")
