@@ -13,8 +13,8 @@ def ifs(-A: Type, z: Bool, yes: Unit -> A, no: Unit -> A) -> A:
 
 # A line-indexed map from Markdown parser spans to original-input UTF-8 byte
 # offsets.  Markdown parsing normalizes CRLF/CR line endings to LF and blanks
-# reference definitions without changing their byte length.  Consequently
-# parser spans are byte offsets in that newline-normalized form.  Within each
+# reference definitions during the block phase without changing source bytes.
+# Consequently parser spans are byte offsets in that newline-normalized form.  Within each
 # physical line newline normalization is byte-preserving; only line endings can
 # shift later offsets, so line-start pairs are sufficient for exact inverse
 # newline mapping.  Build the map from the same original input passed to the

@@ -3,8 +3,8 @@ import Base
 # A half-open interval `[start, end)` of UTF-8 byte offsets.  These are not
 # character indexes, line/column pairs, or necessarily original-file offsets:
 # each producer defines the coordinate space.  Markdown spans are offsets in
-# the newline-normalized source (CRLF and CR become LF), with reference
-# definitions blanked rather than removed so their bytes still occupy space.
+# the newline-normalized source (CRLF and CR become LF). Reference definitions are
+# extracted during the block phase without removing or rewriting source bytes.
 # Use `source_map.bend` with the original input to translate Markdown spans
 # back to original-file byte offsets.  Markdown inline link and destination
 # spans are exact in that coordinate space for supported parses.  Container
