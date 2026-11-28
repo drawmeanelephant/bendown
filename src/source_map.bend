@@ -1,5 +1,6 @@
 import Base
 import ./ast.bend as Ast
+import ./document_links.bend as DocumentLinks
 import ./text.bend as Text
 
 
@@ -10,12 +11,16 @@ def ifs(-A: Type, z: Bool, yes: Unit -> A, no: Unit -> A) -> A:
     case False{}:
       no(Unit{})
 
-# A line-indexed map from parser spans to original-input UTF-8 byte offsets.
-# Markdown parsing normalizes CRLF/CR line endings to LF and blanks reference
-# definitions without changing their byte length.  Consequently parser spans
-# are exact byte offsets in that normalized form.  Within each physical line
-# normalization is byte-preserving; only line endings can shift later offsets,
-# so line-start pairs are sufficient for exact inverse mapping.
+# A line-indexed map from Markdown parser spans to original-input UTF-8 byte
+# offsets.  Markdown parsing normalizes CRLF/CR line endings to LF and blanks
+# reference definitions without changing their byte length.  Consequently
+# parser spans are byte offsets in that newline-normalized form.  Within each
+# physical line newline normalization is byte-preserving; only line endings can
+# shift later offsets, so line-start pairs are sufficient for exact inverse
+# newline mapping.  Build the map from the same original input passed to the
+# parser.  This cannot repair positions that were approximate before mapping
+# (for example container block spans that describe stripped content rather
+# than the complete marker-inclusive source extent).
 type SourceLineOffset is Data:
   SourceLineOffset{normalized_start: U32, original_start: U32}
 
@@ -85,3 +90,49 @@ def source_map_original_span(+map: SourceMap, span: Ast.Span) -> Ast.Span:
     case Ast.Span{start, end}:
       Ast.Span{source_map_original_offset(map, start),
         source_map_original_offset(map, end)}
+
+
+def source_map_original_maybe_span(+map: SourceMap,
+  m: Maybe<&2, Ast.Span>) -> Maybe<&2, Ast.Span>:
+  match m:
+    case Some{+span}:
+      Some{source_map_original_span(map, span)}
+    case None{}:
+      None{}
+
+# Map every part of Markdown link destination provenance from parser coordinates
+# to original-input UTF-8 byte offsets.  For reference links this includes both
+# the destination inside the definition and the whole definition span; the use
+# site is carried separately by DocumentLink.span.
+def source_map_original_link_destination(+map: SourceMap,
+  x: Ast.LinkDestination) -> Ast.LinkDestination:
+  match x:
+    case Ast.LinkDestination{raw, logical, span, definition_span}:
+      Ast.LinkDestination{raw, logical, source_map_original_span(map, span),
+        source_map_original_maybe_span(map, definition_span)}
+
+def source_map_original_link_destination_maybe(+map: SourceMap,
+  m: Maybe<&2, Ast.LinkDestination>) -> Maybe<&2, Ast.LinkDestination>:
+  match m:
+    case Some{+x}:
+      Some{source_map_original_link_destination(map, x)}
+    case None{}:
+      None{}
+
+# Map a document link's whole-node span and destination provenance in one step.
+# `target`, `kind`, and the lexical/logical destination strings are unchanged.
+def source_map_original_document_link(+map: SourceMap,
+  x: DocumentLinks.DocumentLink) -> DocumentLinks.DocumentLink:
+  match x:
+    case DocumentLinks.DocumentLink{target, span, kind, destination}:
+      DocumentLinks.DocumentLink{target, source_map_original_span(map, span), kind,
+        source_map_original_link_destination_maybe(map, destination)}
+
+def source_map_original_document_links(+map: SourceMap,
+  xs: List<&2, DocumentLinks.DocumentLink>) -> List<&2, DocumentLinks.DocumentLink>:
+  match xs:
+    case Nil{}:
+      Nil{}
+    case h <> t:
+      source_map_original_document_link(map, h) <>
+        source_map_original_document_links(map, t)

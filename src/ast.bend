@@ -1,15 +1,29 @@
 import Base
 
+# A half-open interval `[start, end)` of UTF-8 byte offsets.  These are not
+# character indexes, line/column pairs, or necessarily original-file offsets:
+# each producer defines the coordinate space.  Markdown spans are offsets in
+# the newline-normalized source (CRLF and CR become LF), with reference
+# definitions blanked rather than removed so their bytes still occupy space.
+# Use `source_map.bend` with the original input to translate Markdown spans
+# back to original-file byte offsets.  Markdown inline link and destination
+# spans are exact in that coordinate space for supported parses.  Container
+# block spans can describe the stripped content region rather than the full
+# marker-inclusive source extent, and fuel-exhausted fallback positions remain
+# approximate.
 type Span is Data:
   Span{start: U32, end: U32}
 
-# Markdown destination provenance.  `raw` is the exact destination spelling
-# inside any angle-bracket delimiters; `logical` is that spelling after
-# Markdown backslash/entity decoding but before URI percent-encoding.  `span`
-# addresses the raw spelling in the parser coordinate space.  For a link whose
-# destination came from a reference definition, `definition_span` is the whole
-# definition and `span` is the destination inside that definition; otherwise
-# `definition_span` is absent and `span` is at the use site.
+# Markdown destination provenance.  `raw` is the exact author-written
+# destination spelling, including the angle brackets when the angle destination
+# form was used.  For an autolink, `raw` is the label inside the autolink
+# brackets.  `logical` is the destination after Markdown backslash/entity
+# decoding (plus `mailto:` completion for email autolinks) but before URI
+# percent-encoding; percent-encoded input is never percent-decoded here.
+# `span` addresses `raw` in the Markdown parser coordinate space.  For a link
+# whose destination came from a reference definition, `definition_span` is the
+# whole definition and `span` is the destination inside that definition;
+# otherwise `definition_span` is absent and `span` is at the use site.
 type LinkDestination is Data:
   LinkDestination{raw: String, logical: String, span: Span,
     definition_span: Maybe<&2, Span>}

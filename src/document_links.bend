@@ -6,6 +6,13 @@ type DocumentLinkKind is Data:
   DocumentLinkAutolink{}
   DocumentLinkImage{}
 
+# A link-like node projected from a document.  `target` is the engine-normalized
+# rendering target retained for compatibility.  `span` is the whole inline node
+# at the use site in the producing parser's coordinate space.  `destination`
+# carries lexical provenance when the parser can provide it: raw/logical forms
+# before publication-policy normalization, the destination-specific span, and
+# reference-definition provenance.  Synthetic ASTs and formats without that
+# provenance may use None.
 type DocumentLink is Data:
   DocumentLink{target: String, span: Ast.Span, kind: DocumentLinkKind,
     destination: Maybe<&2, Ast.LinkDestination>}

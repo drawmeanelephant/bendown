@@ -1,11 +1,34 @@
 import Base
 import ../src/ast.bend as Ast
 import ../src/source_map.bend as SourceMap
+import ../src/document_links.bend as DocumentLinks
+import ../src/parser/markdown.bend as Markdown
 
 def show_span(sp: Ast.Span) -> String:
   match sp:
     case Ast.Span{start, end}:
       U32.show(start) ++ "-" ++ U32.show(end)
+
+def show_maybe_span(m: Maybe<&2, Ast.Span>) -> String:
+  match m:
+    case Some{x}:
+      "Some(" ++ show_span(x) ++ ")"
+    case None{}:
+      "None"
+
+def show_mapped_first(links: List<&2, DocumentLinks.DocumentLink>, +map: SourceMap.SourceMap) -> String:
+  match links:
+    case Nil{}:
+      "missing"
+    case +h <> t:
+      +mapped = SourceMap.source_map_original_document_link(map, h)
+      show_span(DocumentLinks.document_link_span(mapped)) ++ "|dest=" ++
+        show_maybe_span(DocumentLinks.document_link_destination_span(mapped)) ++ "|def=" ++
+        show_maybe_span(DocumentLinks.document_link_definition_span(mapped))
+
+def show_mapped_first_input(+input: String) -> String:
+  show_mapped_first(DocumentLinks.document_links(Markdown.parse_markdown(input)),
+    SourceMap.source_map_from_original(input))
 
 def ifs(-A: Type, z: Bool, yes: Unit -> A, no: Unit -> A) -> A:
   match z:
@@ -32,4 +55,13 @@ def main() -> IO(Unit):
     +lfmap : SourceMap.SourceMap = SourceMap.source_map_from_original("alpha\nbeta")
     Unit <- expect_equal("lf-offset-identity",
       "8", U32.show(SourceMap.source_map_original_offset(lfmap, 8)))
+    Unit <- expect_equal("mixed-newline-unicode-document-link-original-spans",
+      "6-20|dest=Some(10-19)|def=None",
+      show_mapped_first_input("é\r\na\n[x](target.md)\r\n"))
+    Unit <- expect_equal("crlf-reference-document-link-original-spans",
+      "18-26|dest=Some(5-14)|def=Some(0-14)",
+      show_mapped_first_input("[x]: target.md\r\n\r\n[use][x]\r\n"))
+    Unit <- expect_equal("crlf-quote-continuation-document-link-original-spans",
+      "8-22|dest=Some(12-21)|def=None",
+      show_mapped_first_input("> aa\r\n> [x](target.md)\r\n"))
     IO.print("source map smoke: all checks passed")

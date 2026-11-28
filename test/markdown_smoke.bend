@@ -140,11 +140,11 @@ def main() -> IO(Unit):
 
 #|empty=Doc{}
 #|paragraph-crlf=Doc{P[T"alpha"@0-5;Soft@5-6;T"beta"@6-10;Soft@10-11;T"gamma"@11-16;]@0-16;}
-#|headings=Doc{H1[T"Alpha"@0-5;]@0-11;H1[T"Beta"@13-17;]@13-22;H2[T"Gamma"@24-29;]@24-33;}
+#|headings=Doc{H1[T"Alpha"@2-7;]@0-11;H1[T"Beta"@13-17;]@13-22;H2[T"Gamma"@24-29;]@24-33;}
 #|thematic=Doc{HR@0-3;HR@5-10;}
 #|fence=Doc{Code(Some("zig"))"const x = 1;\n"@0-23;P[T"after"@24-29;]@24-29;}
 #|indented=Doc{P[T"para"@0-4;]@0-4;Code(None)"code <x>\nsecond\n"@6-29;P[T"after"@30-35;]@30-35;}
-#|quote=Doc{Q{H1[T"Quote"@2-7;]@2-9;P[T"text "@12-17;E[T"em"@18-20;]@17-21;]@12-21;P[T"second"@27-33;Soft@33-34;T"outside"@34-41;]@27-41;}@0-41;}
+#|quote=Doc{Q{H1[T"Quote"@4-9;]@2-9;P[T"text "@12-17;E[T"em"@18-20;]@17-21;]@12-21;P[T"second"@27-33;Soft@33-34;T"outside"@34-41;]@27-41;}@0-41;}
 #|lists=Doc{List(False,1,True){Item(P[T"one"@2-5;]);Item(P[T"two with "@8-17;C"code"@17-23;]);}@0-23;List(True,1,True){Item(P[T"first"@28-33;]);Item(P[T"second"@37-43;]);}@25-43;}
 #|inline=Doc{P[T"Text "@0-5;C"code"@5-11;T" and "@11-16;E[T"em"@17-19;]@16-20;T" and "@20-25;S[T"strong"@27-33;]@25-35;T" and "@35-40;L[T"link"@41-45;]("https://e.test",Some("Title"))@40-70;T" plus "@70-76;Img("img.png","alt",None)@76-91;T" and "@91-96;A("https://example.com","https://example.com")@96-117;T"."@117-118;]@0-118;}
 #|malformed=Doc{P[T"*"@0-1;T"open "@1-6;T"["@6-7;T"broken](x and "@7-21;T"`"@21-22;T"code"@22-26;]@0-26;}
@@ -156,7 +156,7 @@ def main() -> IO(Unit):
 #|email=Doc{P[A("mailto:user@example.com","user@example.com")@0-18;]@0-18;}
 #|nested-quote=Doc{Q{Q{P[T"nested"@4-10;]@4-10;}@2-10;}@0-10;}
 #|ordered-start=Doc{List(True,3,True){Item(P[T"three"@3-8;]);Item(P[T"four"@12-16;]);}@0-16;}
-#|list-continuation=Doc{List(False,1,True){Item(P[T"one"@2-5;Soft@5-6;T"continued"@6-15;]);Item(P[T"two"@20-23;]);}@0-23;}
+#|list-continuation=Doc{List(False,1,True){Item(P[T"one"@2-5;Soft@5-6;T"continued"@8-17;]);Item(P[T"two"@20-23;]);}@0-23;}
 #|bound-empty-zero=Some(Doc{})
 #|bound-nonempty-zero=None
 #|bound-ascii-fit=Some(Doc{P[T"abc"@0-3;]@0-3;})
