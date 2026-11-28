@@ -7,22 +7,65 @@ type DocumentLinkKind is Data:
   DocumentLinkImage{}
 
 type DocumentLink is Data:
-  DocumentLink{target: String, span: Ast.Span, kind: DocumentLinkKind}
+  DocumentLink{target: String, span: Ast.Span, kind: DocumentLinkKind,
+    destination: Maybe<&2, Ast.LinkDestination>}
 
 def document_link_target(x: DocumentLink) -> String:
   match x:
-    case DocumentLink{target, span, kind}:
+    case DocumentLink{target, span, kind, destination}:
       target
 
 def document_link_span(x: DocumentLink) -> Ast.Span:
   match x:
-    case DocumentLink{target, span, kind}:
+    case DocumentLink{target, span, kind, destination}:
       span
 
 def document_link_kind(x: DocumentLink) -> DocumentLinkKind:
   match x:
-    case DocumentLink{target, span, kind}:
+    case DocumentLink{target, span, kind, destination}:
       kind
+
+
+def document_link_destination(x: DocumentLink) -> Maybe<&2, Ast.LinkDestination>:
+  match x:
+    case DocumentLink{target, span, kind, destination}:
+      destination
+
+def document_link_raw_target(x: DocumentLink) -> Maybe<&2, String>:
+  match x:
+    case DocumentLink{target, span, kind, destination}:
+      match destination:
+        case Some{+d}:
+          Some{Ast.link_destination_raw(d)}
+        case None{}:
+          None{}
+
+def document_link_logical_target(x: DocumentLink) -> Maybe<&2, String>:
+  match x:
+    case DocumentLink{target, span, kind, destination}:
+      match destination:
+        case Some{+d}:
+          Some{Ast.link_destination_logical(d)}
+        case None{}:
+          None{}
+
+def document_link_destination_span(x: DocumentLink) -> Maybe<&2, Ast.Span>:
+  match x:
+    case DocumentLink{target, span, kind, destination}:
+      match destination:
+        case Some{+d}:
+          Some{Ast.link_destination_span(d)}
+        case None{}:
+          None{}
+
+def document_link_definition_span(x: DocumentLink) -> Maybe<&2, Ast.Span>:
+  match x:
+    case DocumentLink{target, span, kind, destination}:
+      match destination:
+        case Some{+d}:
+          Ast.link_destination_definition_span(d)
+        case None{}:
+          None{}
 
 type DocumentLinkWork is Data:
   DlwInline{one: Ast.Inline}
@@ -50,12 +93,12 @@ def document_links_work(+fuel: Nat, work: DocumentLinkWork) -> List<&2, Document
               document_link_cat(document_links_work(f, DlwInline{h}), document_links_work(f, DlwInlines{t}))
         case DlwInline{one}:
           match one:
-            case Ast.ILink{children, href, title, span}:
-              DocumentLink{href, span, DocumentLinkInline{}} <> document_links_work(f, DlwInlines{children})
-            case Ast.IImage{src, alt, title, span}:
-              DocumentLink{src, span, DocumentLinkImage{}} <> Nil{}
-            case Ast.IAutolink{href, label, span}:
-              DocumentLink{href, span, DocumentLinkAutolink{}} <> Nil{}
+            case Ast.ILink{children, href, title, span, destination}:
+              DocumentLink{href, span, DocumentLinkInline{}, destination} <> document_links_work(f, DlwInlines{children})
+            case Ast.IImage{src, alt, title, span, destination}:
+              DocumentLink{src, span, DocumentLinkImage{}, destination} <> Nil{}
+            case Ast.IAutolink{href, label, span, destination}:
+              DocumentLink{href, span, DocumentLinkAutolink{}, destination} <> Nil{}
             case Ast.IEmph{children, span}:
               document_links_work(f, DlwInlines{children})
             case Ast.IStrong{children, span}:

@@ -58,16 +58,26 @@ def link_parts_after(x: LinkParts) -> String:
       after
 
 type LinkTarget is Data:
-  LinkTarget{href: String, title: Maybe<&2, String>}
+  LinkTarget{href: String, logical_href: String, raw_href: String, title: Maybe<&2, String>}
 
 def link_target_href(x: LinkTarget) -> String:
   match x:
-    case LinkTarget{href, title}:
+    case LinkTarget{href, logical_href, raw_href, title}:
       href
+
+def link_target_logical_href(x: LinkTarget) -> String:
+  match x:
+    case LinkTarget{href, logical_href, raw_href, title}:
+      logical_href
+
+def link_target_raw_href(x: LinkTarget) -> String:
+  match x:
+    case LinkTarget{href, logical_href, raw_href, title}:
+      raw_href
 
 def link_target_title(x: LinkTarget) -> Maybe<&2, String>:
   match x:
-    case LinkTarget{href, title}:
+    case LinkTarget{href, logical_href, raw_href, title}:
       title
 
 type EntityHit is Data:
@@ -404,23 +414,28 @@ def md_uri_encode(s: String) -> String:
 def md_normalize_uri(+s: String) -> String:
   md_uri_encode(md_decode_ee(s))
 
-def md_compact_horizontal_space(s: String) -> String:
+def md_compact_horizontal_space_go(s: String, +acc: String) -> String:
   match s:
     case SNil{}:
-      SNil{}
+      String.reverse(acc)
     case SCon{' ', t}:
-      md_compact_horizontal_space(t)
+      md_compact_horizontal_space_go(t, acc)
     case SCon{'\t', t}:
-      md_compact_horizontal_space(t)
-    case SCon{h, t}:
-      SCon{h, md_compact_horizontal_space(t)}
+      md_compact_horizontal_space_go(t, acc)
+    case SCon{+h, +t}:
+      md_compact_horizontal_space_go(t, SCon{h, acc})
+
+def md_compact_horizontal_space(s: String) -> String:
+  md_compact_horizontal_space_go(s, SNil{})
 
 def md_all_char(s: String, +c: Char) -> Bool:
   match s:
     case SNil{}:
       True{}
-    case SCon{h, t}:
-      Bool.and(Char.is_eq(h, c), md_all_char(t, c))
+    case SCon{+h, +t}:
+      ifs(Bool, Char.is_eq(h, c),
+        u => md_all_char(t, c),
+        u => False{})
 
 def md_has_line_break_or_space(s: String) -> Bool:
   match s:
@@ -446,8 +461,21 @@ def md_find_sub_index(+s: String, +needle: String, +idx: Nat) -> Maybe<&2, Nat>:
         u => Some{idx},
         u => md_find_sub_index(t, needle, 1n+idx))
 
+def md_take_go(s: String, n: Nat, +acc: String) -> String:
+  match s n:
+    case SNil{} _:
+      String.reverse(acc)
+    case _ 0n:
+      String.reverse(acc)
+    case SCon{+h, +t} 1n++p:
+      md_take_go(t, p, SCon{h, acc})
+
+# Character-count prefix extraction without input-length non-tail recursion.
+def md_take(+s: String, +n: Nat) -> String:
+  md_take_go(s, n, SNil{})
+
 def md_split_at_index(+s: String, +idx: Nat, +width: Nat) -> StrSplit:
-  StrSplit{String.take(s, idx), String.drop(s, Nat.add(idx, width))}
+  StrSplit{md_take(s, idx), String.drop(s, Nat.add(idx, width))}
 
 def md_split_at_maybe(+s: String, +needle: String, m: Maybe<&2, Nat>) -> Maybe<&2, StrSplit>:
   match m:
@@ -466,6 +494,9 @@ def md_pos_add(+p: U32, n: Nat) -> U32:
 
 def md_pos_add_text(+p: U32, +s: String) -> U32:
   md_pos_add(p, Text.utf8_length(s))
+
+def md_span_mk(+start: U32, +end: U32) -> Ast.Span:
+  Ast.Span{start, end}
 
 def md_span_text(+start: U32, +text: String) -> Ast.Span:
   Ast.Span{start, md_pos_add_text(start, text)}
@@ -520,7 +551,7 @@ def md_normalize_code_span(+raw: String) -> String:
     Bool.and(String.starts_with(s, " "), String.ends_with(s, " ")))
   +strip = Bool.and(both, Bool.not(md_all_spaces(s)))
   ifs(String, strip,
-    u => String.take(String.drop(s, 1n), Nat.sub(len, 2n)),
+    u => md_take(String.drop(s, 1n), Nat.sub(len, 2n)),
     u => s)
 
 # Scan the inside of an inline-link parenthesis.  Parentheses nested in the
@@ -737,18 +768,20 @@ def md_scan_title(+s: String) -> Maybe<&2, WordSplit>:
 
 def md_finish_link_target(+rawdest: String, +rest0: String) -> Maybe<&2, LinkTarget>:
   +separated = String.is_empty(rest0) || md_starts_inline_space(rest0)
+  +logical = md_decode_ee(rawdest)
+  +href = md_uri_encode(logical)
   ifs(Maybe<&2, LinkTarget>, Bool.not(separated),
     u => None{},
     u =>
       +rest = md_trim_inline(rest0)
       ifs(Maybe<&2, LinkTarget>, String.is_empty(rest),
-        v => Some{LinkTarget{md_normalize_uri(rawdest), None{}}},
+        v => Some{LinkTarget{href, logical, rawdest, None{}}},
         v =>
           maybe_case(WordSplit, Maybe<&2, LinkTarget>, md_scan_title(rest),
             +hit =>
               +after = md_trim_inline(word_split_rest(hit))
               ifs(Maybe<&2, LinkTarget>, String.is_empty(after),
-                w => Some{LinkTarget{md_normalize_uri(rawdest),
+                w => Some{LinkTarget{href, logical, rawdest,
                   Some{md_decode_ee(word_split_word(hit))}}},
                 w => None{}),
             w => None{})))
@@ -756,7 +789,7 @@ def md_finish_link_target(+rawdest: String, +rest0: String) -> Maybe<&2, LinkTar
 def md_parse_link_target(+inside: String) -> Maybe<&2, LinkTarget>:
   +trimmed = md_trim_inline(inside)
   ifs(Maybe<&2, LinkTarget>, String.is_empty(trimmed),
-    u => Some{LinkTarget{"", None{}}},
+    u => Some{LinkTarget{"", "", "", None{}}},
     u =>
       ifs(Maybe<&2, LinkTarget>, String.starts_with(trimmed, "<"),
         v =>
@@ -773,53 +806,106 @@ def md_parse_link_target(+inside: String) -> Maybe<&2, LinkTarget>:
 # as literal source strings: case folding and whitespace normalization happen
 # before comparison, but backslash escapes and entities are not decoded.
 type RefDef is Data:
-  RefDef{label: String, href: String, title: Maybe<&2, String>}
+  RefDef{label: String, href: String, logical_href: String, raw_href: String,
+    title: Maybe<&2, String>, destination_span: Ast.Span, definition_span: Ast.Span}
 
 def ref_def_label(x: RefDef) -> String:
   match x:
-    case RefDef{label, href, title}:
+    case RefDef{label, href, logical_href, raw_href, title, destination_span, definition_span}:
       label
 
 def ref_def_href(x: RefDef) -> String:
   match x:
-    case RefDef{label, href, title}:
+    case RefDef{label, href, logical_href, raw_href, title, destination_span, definition_span}:
       href
+
+def ref_def_logical_href(x: RefDef) -> String:
+  match x:
+    case RefDef{label, href, logical_href, raw_href, title, destination_span, definition_span}:
+      logical_href
+
+def ref_def_raw_href(x: RefDef) -> String:
+  match x:
+    case RefDef{label, href, logical_href, raw_href, title, destination_span, definition_span}:
+      raw_href
 
 def ref_def_title(x: RefDef) -> Maybe<&2, String>:
   match x:
-    case RefDef{label, href, title}:
+    case RefDef{label, href, logical_href, raw_href, title, destination_span, definition_span}:
       title
 
+def ref_def_destination_span(x: RefDef) -> Ast.Span:
+  match x:
+    case RefDef{label, href, logical_href, raw_href, title, destination_span, definition_span}:
+      destination_span
+
+def ref_def_definition_span(x: RefDef) -> Ast.Span:
+  match x:
+    case RefDef{label, href, logical_href, raw_href, title, destination_span, definition_span}:
+      definition_span
+
 type RefHit is Data:
-  RefHit{definition: RefDef, rest: String}
+  RefHit{definition: RefDef, rest: String, consumed: Nat}
 
 def ref_hit_def(x: RefHit) -> RefDef:
   match x:
-    case RefHit{definition, rest}:
+    case RefHit{definition, rest, consumed}:
       definition
 
 def ref_hit_rest(x: RefHit) -> String:
   match x:
-    case RefHit{definition, rest}:
+    case RefHit{definition, rest, consumed}:
       rest
 
+def ref_hit_consumed(x: RefHit) -> Nat:
+  match x:
+    case RefHit{definition, rest, consumed}:
+      consumed
+
 type RefTargetHit is Data:
-  RefTargetHit{href: String, title: Maybe<&2, String>, rest: String}
+  RefTargetHit{href: String, logical_href: String, raw_href: String,
+    title: Maybe<&2, String>, rest: String, consumed: Nat,
+    dest_start: Nat, dest_end: Nat}
 
 def ref_target_hit_href(x: RefTargetHit) -> String:
   match x:
-    case RefTargetHit{href, title, rest}:
+    case RefTargetHit{href, logical_href, raw_href, title, rest, consumed, dest_start, dest_end}:
       href
+
+def ref_target_hit_logical_href(x: RefTargetHit) -> String:
+  match x:
+    case RefTargetHit{href, logical_href, raw_href, title, rest, consumed, dest_start, dest_end}:
+      logical_href
+
+def ref_target_hit_raw_href(x: RefTargetHit) -> String:
+  match x:
+    case RefTargetHit{href, logical_href, raw_href, title, rest, consumed, dest_start, dest_end}:
+      raw_href
 
 def ref_target_hit_title(x: RefTargetHit) -> Maybe<&2, String>:
   match x:
-    case RefTargetHit{href, title, rest}:
+    case RefTargetHit{href, logical_href, raw_href, title, rest, consumed, dest_start, dest_end}:
       title
 
 def ref_target_hit_rest(x: RefTargetHit) -> String:
   match x:
-    case RefTargetHit{href, title, rest}:
+    case RefTargetHit{href, logical_href, raw_href, title, rest, consumed, dest_start, dest_end}:
       rest
+
+def ref_target_hit_consumed(x: RefTargetHit) -> Nat:
+  match x:
+    case RefTargetHit{href, logical_href, raw_href, title, rest, consumed, dest_start, dest_end}:
+      consumed
+
+def ref_target_hit_dest_start(x: RefTargetHit) -> Nat:
+  match x:
+    case RefTargetHit{href, logical_href, raw_href, title, rest, consumed, dest_start, dest_end}:
+      dest_start
+
+def ref_target_hit_dest_end(x: RefTargetHit) -> Nat:
+  match x:
+    case RefTargetHit{href, logical_href, raw_href, title, rest, consumed, dest_start, dest_end}:
+      dest_end
 
 # A link label ends at the first unescaped `]`; unescaped `[` is not allowed.
 def md_scan_link_label_go(fuel: Nat, +s: String, +acc: String) -> Maybe<&2, StrSplit>:
@@ -913,19 +999,76 @@ def md_scan_hspace_go(s: String, +acc: String) -> WordSplit:
 def md_scan_hspace(+s: String) -> WordSplit:
   md_scan_hspace_go(s, SNil{})
 
+type RefWs is Data:
+  RefWs{rest: String, consumed: Nat}
+
+def ref_ws_rest(x: RefWs) -> String:
+  match x:
+    case RefWs{rest, consumed}:
+      rest
+
+def ref_ws_consumed(x: RefWs) -> Nat:
+  match x:
+    case RefWs{rest, consumed}:
+      consumed
+
 # Spaces/tabs plus at most one line ending, followed again by spaces/tabs.
-def md_skip_ref_ws(+s: String) -> String:
+def md_skip_ref_ws_count(+s: String) -> RefWs:
   +first = md_scan_hspace(s)
+  +firstlen = Text.utf8_length(word_split_word(first))
   +after = word_split_rest(first)
-  ifs(String, String.starts_with(after, "\n"),
-    u => word_split_rest(md_scan_hspace(String.drop(after, 1n))),
-    u => after)
+  ifs(RefWs, String.starts_with(after, "\n"),
+    u =>
+      +second = md_scan_hspace(String.drop(after, 1n))
+      +secondlen = Text.utf8_length(word_split_word(second))
+      RefWs{word_split_rest(second), Nat.add(Nat.add(firstlen, 1n), secondlen)},
+    u => RefWs{after, firstlen})
+
+def md_skip_ref_ws(+s: String) -> String:
+  ref_ws_rest(md_skip_ref_ws_count(s))
 
 def md_ref_line_end(+s: String) -> Bool:
   String.is_empty(s) || String.starts_with(s, "\n")
 
 def md_ref_title_opener(+s: String) -> Bool:
   String.starts_with(s, "\"") || String.starts_with(s, "'") || String.starts_with(s, "(")
+
+type RefTitleHit is Data:
+  RefTitleHit{title: String, rest: String, consumed: Nat}
+
+def ref_title_hit_title(x: RefTitleHit) -> String:
+  match x:
+    case RefTitleHit{title, rest, consumed}:
+      title
+
+def ref_title_hit_rest(x: RefTitleHit) -> String:
+  match x:
+    case RefTitleHit{title, rest, consumed}:
+      rest
+
+def ref_title_hit_consumed(x: RefTitleHit) -> Nat:
+  match x:
+    case RefTitleHit{title, rest, consumed}:
+      consumed
+
+# Try a title at the current position.  On success the returned rest begins
+# at the line ending (or EOF) after optional trailing horizontal spaces, and
+# consumed counts both title delimiters plus that trailing horizontal space.
+def md_try_ref_title_count(+s: String) -> Maybe<&2, RefTitleHit>:
+  ifs(Maybe<&2, RefTitleHit>, md_ref_title_opener(s),
+    u =>
+      maybe_case(WordSplit, Maybe<&2, RefTitleHit>, md_scan_title(s),
+        +hit =>
+          +tail = md_scan_hspace(word_split_rest(hit))
+          +after = word_split_rest(tail)
+          +titlelen = Text.utf8_length(word_split_word(hit))
+          +taillen = Text.utf8_length(word_split_word(tail))
+          +consumed = Nat.add(Nat.add(1n, titlelen), Nat.add(1n, taillen))
+          ifs(Maybe<&2, RefTitleHit>, md_ref_line_end(after),
+            v => Some{RefTitleHit{md_decode_ee(word_split_word(hit)), after, consumed}},
+            v => None{}),
+        v => None{}),
+    u => None{})
 
 # Try a title at the current position.  On success the returned rest begins
 # at the line ending (or EOF) after optional trailing horizontal spaces.
@@ -942,50 +1085,75 @@ def md_try_ref_title(+s: String) -> Maybe<&2, WordSplit>:
         v => None{}),
     u => None{})
 
-def md_ref_target_finish(+href: String, title: Maybe<&2, String>, +rest: String) -> Maybe<&2, RefTargetHit>:
-  Some{RefTargetHit{href, title, rest}}
+def md_ref_target_hit_make(+href: String, +logical: String, +raw: String,
+  title: Maybe<&2, String>, +rest: String, +consumed: Nat,
+  +dest_start: Nat, +dest_end: Nat) -> Maybe<&2, RefTargetHit>:
+  Some{RefTargetHit{href, logical, raw, title, rest, consumed, dest_start, dest_end}}
 
-def md_finish_ref_dest(+rawdest: String, +rest: String) -> Maybe<&2, RefTargetHit>:
+def md_finish_ref_dest_pos(+rawdest: String, +rest: String, +baseconsumed: Nat,
+  +dest_start: Nat, +dest_end: Nat) -> Maybe<&2, RefTargetHit>:
   +firstcode = md_str_at(rest, 0n)
   +sep = String.is_empty(rest) || Bool.or(U32.is_eq(firstcode, 32),
     Bool.or(U32.is_eq(firstcode, 9), U32.is_eq(firstcode, 10)))
+  +logical = md_decode_ee(rawdest)
+  +href = md_uri_encode(logical)
   ifs(Maybe<&2, RefTargetHit>, Bool.not(sep),
     u => None{},
     u =>
       +hs = md_scan_hspace(rest)
+      +hslen = Text.utf8_length(word_split_word(hs))
       +hadspace = Bool.not(String.is_empty(word_split_word(hs)))
       +afterh = word_split_rest(hs)
-      +href = md_normalize_uri(rawdest)
+      +baseh = Nat.add(baseconsumed, hslen)
       ifs(Maybe<&2, RefTargetHit>, String.is_empty(afterh),
-        v => md_ref_target_finish(href, None{}, afterh),
+        v => md_ref_target_hit_make(href, logical, rawdest, None{}, afterh, baseh, dest_start, dest_end),
         v =>
           ifs(Maybe<&2, RefTargetHit>, String.starts_with(afterh, "\n"),
             w =>
-              +nextstart = word_split_rest(md_scan_hspace(String.drop(afterh, 1n)))
-              maybe_case(WordSplit, Maybe<&2, RefTargetHit>, md_try_ref_title(nextstart),
-                +titlehit => md_ref_target_finish(href, Some{word_split_word(titlehit)}, word_split_rest(titlehit)),
-                x => md_ref_target_finish(href, None{}, afterh)),
+              +indentscan = md_scan_hspace(String.drop(afterh, 1n))
+              +indentlen = Text.utf8_length(word_split_word(indentscan))
+              +nextstart = word_split_rest(indentscan)
+              maybe_case(RefTitleHit, Maybe<&2, RefTargetHit>, md_try_ref_title_count(nextstart),
+                +titlehit =>
+                  +titleconsumed = Nat.add(Nat.add(Nat.add(baseh, 1n), indentlen), ref_title_hit_consumed(titlehit))
+                  md_ref_target_hit_make(href, logical, rawdest, Some{ref_title_hit_title(titlehit)},
+                    ref_title_hit_rest(titlehit), titleconsumed, dest_start, dest_end),
+                x => md_ref_target_hit_make(href, logical, rawdest, None{}, afterh, baseh, dest_start, dest_end)),
             w =>
               ifs(Maybe<&2, RefTargetHit>, Bool.and(hadspace, md_ref_title_opener(afterh)),
                 x =>
-                  maybe_case(WordSplit, Maybe<&2, RefTargetHit>, md_try_ref_title(afterh),
-                    +titlehit => md_ref_target_finish(href, Some{word_split_word(titlehit)}, word_split_rest(titlehit)),
+                  maybe_case(RefTitleHit, Maybe<&2, RefTargetHit>, md_try_ref_title_count(afterh),
+                    +titlehit =>
+                      +titleconsumed = Nat.add(baseh, ref_title_hit_consumed(titlehit))
+                      md_ref_target_hit_make(href, logical, rawdest, Some{ref_title_hit_title(titlehit)},
+                        ref_title_hit_rest(titlehit), titleconsumed, dest_start, dest_end),
                     y => None{}),
                 x => None{}))))
 
 def md_scan_ref_target(+aftercolon: String) -> Maybe<&2, RefTargetHit>:
-  +start = md_skip_ref_ws(aftercolon)
+  +ws = md_skip_ref_ws_count(aftercolon)
+  +start = ref_ws_rest(ws)
+  +lead = ref_ws_consumed(ws)
   ifs(Maybe<&2, RefTargetHit>, String.starts_with(start, "<"),
     u =>
       maybe_case(WordSplit, Maybe<&2, RefTargetHit>, md_scan_angle_dest(String.drop(start, 1n)),
-        +hit => md_finish_ref_dest(word_split_word(hit), word_split_rest(hit)),
+        +hit =>
+          +rawlen = Text.utf8_length(word_split_word(hit))
+          +deststart = Nat.add(lead, 1n)
+          +destend = Nat.add(deststart, rawlen)
+          +base = Nat.add(destend, 1n)
+          md_finish_ref_dest_pos(word_split_word(hit), word_split_rest(hit), base, deststart, destend),
         v => None{}),
     u =>
       maybe_case(WordSplit, Maybe<&2, RefTargetHit>, md_scan_plain_dest(start),
-        +hit => md_finish_ref_dest(word_split_word(hit), word_split_rest(hit)),
+        +hit =>
+          +rawlen = Text.utf8_length(word_split_word(hit))
+          +deststart = lead
+          +destend = Nat.add(deststart, rawlen)
+          md_finish_ref_dest_pos(word_split_word(hit), word_split_rest(hit), destend, deststart, destend),
         v => None{}))
 
-def md_scan_reference_definition(+s: String) -> Maybe<&2, RefHit>:
+def md_scan_reference_definition_at(+s: String, +basepos: U32) -> Maybe<&2, RefHit>:
   maybe_case(StrSplit, Maybe<&2, RefHit>, md_scan_link_label(s),
     +labelhit =>
       +afterlabel = str_split_after(labelhit)
@@ -994,12 +1162,23 @@ def md_scan_reference_definition(+s: String) -> Maybe<&2, RefHit>:
           maybe_case(RefTargetHit, Maybe<&2, RefHit>,
             md_scan_ref_target(String.drop(afterlabel, 1n)),
             +targethit =>
+              +labellen = Text.utf8_length(str_split_before(labelhit))
+              +prefix = Nat.add(labellen, 3n)
+              +defconsumed = Nat.add(prefix, ref_target_hit_consumed(targethit))
+              +deststartrel = Nat.add(prefix, ref_target_hit_dest_start(targethit))
+              +destendrel = Nat.add(prefix, ref_target_hit_dest_end(targethit))
+              +destspan = md_span_mk(md_pos_add(basepos, deststartrel), md_pos_add(basepos, destendrel))
+              +defspan = md_span_mk(basepos, md_pos_add(basepos, defconsumed))
               +definition : RefDef = RefDef{md_normalize_ref_label(str_split_before(labelhit)),
-                ref_target_hit_href(targethit), ref_target_hit_title(targethit)}
-              Some{RefHit{definition, ref_target_hit_rest(targethit)}},
+                ref_target_hit_href(targethit), ref_target_hit_logical_href(targethit),
+                ref_target_hit_raw_href(targethit), ref_target_hit_title(targethit), destspan, defspan}
+              Some{RefHit{definition, ref_target_hit_rest(targethit), defconsumed}},
             v => None{}),
         u => None{}),
     v => None{})
+
+def md_scan_reference_definition(+s: String) -> Maybe<&2, RefHit>:
+  md_scan_reference_definition_at(s, 0)
 
 def md_refs_have_label(+refs: List<&2, RefDef>, +label: String) -> Bool:
   match refs:
@@ -1407,28 +1586,45 @@ def md_unicode_space_code(+code: U32) -> Bool:
 
 # A unified validated link/image target plus the unconsumed input after it.
 type LinkChoice is Data:
-  LinkChoice{target: LinkTarget, after: String}
+  LinkChoice{target: LinkTarget, after: String, destination_span: Ast.Span,
+    reference_definition_span: Maybe<&2, Ast.Span>}
 
 def link_choice_target(x: LinkChoice) -> LinkTarget:
   match x:
-    case LinkChoice{target, after}:
+    case LinkChoice{target, after, destination_span, reference_definition_span}:
       target
 
 def link_choice_after(x: LinkChoice) -> String:
   match x:
-    case LinkChoice{target, after}:
+    case LinkChoice{target, after, destination_span, reference_definition_span}:
       after
 
-def md_link_choice(+target: LinkTarget, +after: String) -> Maybe<&2, LinkChoice>:
-  Some{LinkChoice{target, after}}
+def link_choice_destination_span(x: LinkChoice) -> Ast.Span:
+  match x:
+    case LinkChoice{target, after, destination_span, reference_definition_span}:
+      destination_span
+
+def link_choice_reference_definition_span(x: LinkChoice) -> Maybe<&2, Ast.Span>:
+  match x:
+    case LinkChoice{target, after, destination_span, reference_definition_span}:
+      reference_definition_span
+
+def md_link_choice(+target: LinkTarget, +after: String, +destination_span: Ast.Span,
+  reference_definition_span: Maybe<&2, Ast.Span>) -> Maybe<&2, LinkChoice>:
+  Some{LinkChoice{target, after, destination_span, reference_definition_span}}
+
+def md_link_destination(+raw: String, +logical: String, +span: Ast.Span,
+  definition_span: Maybe<&2, Ast.Span>) -> Maybe<&2, Ast.LinkDestination>:
+  Some{Ast.LinkDestination{raw, logical, span, definition_span}}
 
 def md_ref_target_from_def(+hit: RefDef) -> LinkTarget:
-  LinkTarget{ref_def_href(hit), ref_def_title(hit)}
+  LinkTarget{ref_def_href(hit), ref_def_logical_href(hit), ref_def_raw_href(hit), ref_def_title(hit)}
 
-def md_lookup_ref_target(+refs: List<&2, RefDef>, +rawlabel: String) -> Maybe<&2, LinkTarget>:
+def md_lookup_ref_choice(+refs: List<&2, RefDef>, +rawlabel: String, +after: String) -> Maybe<&2, LinkChoice>:
   +label = md_normalize_ref_label(rawlabel)
-  maybe_case(RefDef, Maybe<&2, LinkTarget>, md_lookup_ref(refs, label),
-    +hit => Some{md_ref_target_from_def(hit)},
+  maybe_case(RefDef, Maybe<&2, LinkChoice>, md_lookup_ref(refs, label),
+    +hit => md_link_choice(md_ref_target_from_def(hit), after,
+      ref_def_destination_span(hit), Some{ref_def_definition_span(hit)}),
     u => None{})
 
 # Reference forms, in precedence order after inline links: full, collapsed,
@@ -1436,33 +1632,57 @@ def md_lookup_ref_target(+refs: List<&2, RefDef>, +rawlabel: String) -> Maybe<&2
 # even when that label itself is undefined.
 def md_scan_ref_label_use(+refs: List<&2, RefDef>, +textlabel: String, +afterclose: String) -> Maybe<&2, LinkChoice>:
   ifs(Maybe<&2, LinkChoice>, String.starts_with(afterclose, "[]"),
-    u =>
-      maybe_case(LinkTarget, Maybe<&2, LinkChoice>, md_lookup_ref_target(refs, textlabel),
-        +target => md_link_choice(target, String.drop(afterclose, 2n)),
-        v => None{}),
+    u => md_lookup_ref_choice(refs, textlabel, String.drop(afterclose, 2n)),
     u =>
       ifs(Maybe<&2, LinkChoice>, String.starts_with(afterclose, "["),
         v =>
           maybe_case(StrSplit, Maybe<&2, LinkChoice>, md_scan_link_label(afterclose),
-            +labelhit =>
-              maybe_case(LinkTarget, Maybe<&2, LinkChoice>,
-                md_lookup_ref_target(refs, str_split_before(labelhit)),
-                +target => md_link_choice(target, str_split_after(labelhit)),
-                w => None{}),
-            w =>
-              maybe_case(LinkTarget, Maybe<&2, LinkChoice>, md_lookup_ref_target(refs, textlabel),
-                +target => md_link_choice(target, afterclose),
-                x => None{})),
-        v =>
-          maybe_case(LinkTarget, Maybe<&2, LinkChoice>, md_lookup_ref_target(refs, textlabel),
-            +target => md_link_choice(target, afterclose),
-            w => None{})))
+            +labelhit => md_lookup_ref_choice(refs, str_split_before(labelhit), str_split_after(labelhit)),
+            w => md_lookup_ref_choice(refs, textlabel, afterclose)),
+        v => md_lookup_ref_choice(refs, textlabel, afterclose)))
 
-def md_scan_inline_link_choice(+textlabel: String, +afterclose: String) -> Maybe<&2, LinkChoice>:
+def md_inline_space_prefix(s: String, +acc: Nat) -> Nat:
+  match s:
+    case SCon{' ', t}:
+      md_inline_space_prefix(t, 1n+acc)
+    case SCon{'\t', t}:
+      md_inline_space_prefix(t, 1n+acc)
+    case SCon{'\n', t}:
+      md_inline_space_prefix(t, 1n+acc)
+    case SCon{'\r', t}:
+      md_inline_space_prefix(t, 1n+acc)
+    case u:
+      acc
+
+def md_inline_dest_span_finish(+start: U32, +raw: String) -> Ast.Span:
+  md_span_mk(start, md_pos_add_text(start, raw))
+
+def md_inline_destination_span(+inside: String, +insidepos: U32) -> Ast.Span:
+  +lead = md_inline_space_prefix(inside, 0n)
+  +trimmed = String.drop(inside, lead)
+  +destbase = md_pos_add(insidepos, lead)
+  ifs(Ast.Span, String.is_empty(trimmed),
+    u => md_span_mk(destbase, destbase),
+    u =>
+      ifs(Ast.Span, String.starts_with(trimmed, "<"),
+        v =>
+          maybe_case(WordSplit, Ast.Span, md_scan_angle_dest(String.drop(trimmed, 1n)),
+            +hit => md_inline_dest_span_finish(md_pos_add(destbase, 1n), word_split_word(hit)),
+            w => md_span_mk(destbase, destbase)),
+        v =>
+          maybe_case(WordSplit, Ast.Span, md_scan_plain_dest(trimmed),
+            +hit => md_inline_dest_span_finish(destbase, word_split_word(hit)),
+            w => md_span_mk(destbase, destbase))))
+
+def md_scan_inline_link_choice(+textlabel: String, +afterclose: String, +bracket_open_pos: U32) -> Maybe<&2, LinkChoice>:
   maybe_case(LinkParts, Maybe<&2, LinkChoice>, md_scan_link_parts_inner(afterclose, textlabel),
     +parts =>
       maybe_case(LinkTarget, Maybe<&2, LinkChoice>, md_parse_link_target(link_parts_inside(parts)),
-        +target => md_link_choice(target, link_parts_after(parts)),
+        +target =>
+          +labelbytes = Text.utf8_length(textlabel)
+          +insidepos = md_pos_add(bracket_open_pos, Nat.add(labelbytes, 3n))
+          +destspan = md_inline_destination_span(link_parts_inside(parts), insidepos)
+          md_link_choice(target, link_parts_after(parts), destspan, None{}),
         u => None{}),
     u => None{})
 
@@ -1838,7 +2058,7 @@ def md_inline_tree_has_link_go(fuel: Nat, xs: List<&2, Ast.Inline>) -> Bool:
           False{}
         case h <> t:
           match h:
-            case Ast.ILink{children, href, title, span}:
+            case Ast.ILink{children, href, title, span, destination}:
               True{}
             case Ast.IEmph{children, span}:
               md_inline_tree_has_link_go(f, children) || md_inline_tree_has_link_go(f, t)
@@ -1896,11 +2116,11 @@ def md_alt_inlines_go(fuel: Nat, xs: List<&2, Ast.Inline>) -> String:
               md_alt_inlines_go(f, children) ++ md_alt_inlines_go(f, t)
             case Ast.ISpan{children, attrs, span}:
               md_alt_inlines_go(f, children) ++ md_alt_inlines_go(f, t)
-            case Ast.ILink{children, href, title, span}:
+            case Ast.ILink{children, href, title, span, destination}:
               md_alt_inlines_go(f, children) ++ md_alt_inlines_go(f, t)
-            case Ast.IImage{src, alt, title, span}:
+            case Ast.IImage{src, alt, title, span, destination}:
               alt ++ md_alt_inlines_go(f, t)
-            case Ast.IAutolink{href, label, span}:
+            case Ast.IAutolink{href, label, span, destination}:
               label ++ md_alt_inlines_go(f, t)
             case Ast.IRawHtml{text, span}:
               md_alt_inlines_go(f, t)
@@ -1979,7 +2199,7 @@ def md_parse_inlines(fuel: Nat, +refs: List<&2, RefDef>, +s: String, +pos: U32) 
             +closehit =>
               +label = str_split_before(closehit)
               +afterclose = str_split_after(closehit)
-              +inlinechoice0 = md_scan_inline_link_choice(label, afterclose)
+              +inlinechoice0 = md_scan_inline_link_choice(label, afterclose, pos)
               +choice = maybe_case(LinkChoice, Maybe<&2, LinkChoice>, inlinechoice0,
                 +inlinehit => Some{inlinehit},
                 u => md_scan_ref_label_use(refs, label, afterclose))
@@ -1987,6 +2207,9 @@ def md_parse_inlines(fuel: Nat, +refs: List<&2, RefDef>, +s: String, +pos: U32) 
                 +goodchoice =>
                   +rest = link_choice_after(goodchoice)
                   +goodtarget = link_choice_target(goodchoice)
+                  +destmeta = md_link_destination(link_target_raw_href(goodtarget),
+                    link_target_logical_href(goodtarget), link_choice_destination_span(goodchoice),
+                    link_choice_reference_definition_span(goodchoice))
                   +label_start = md_pos_add(pos, 1n)
                   +used = Nat.sub(Text.utf8_length(s), Text.utf8_length(rest))
                   +endpos = md_pos_add(pos, used)
@@ -1997,7 +2220,7 @@ def md_parse_inlines(fuel: Nat, +refs: List<&2, RefDef>, +s: String, +pos: U32) 
                     q => Ast.IText{"[", md_span_text(pos, "[")} <>
                       md_parse_inlines(f, refs, t, md_pos_add_text(pos, "[")),
                     q => Ast.ILink{labelinner, link_target_href(goodtarget),
-                      link_target_title(goodtarget), Ast.Span{pos, endpos}} <>
+                      link_target_title(goodtarget), Ast.Span{pos, endpos}, destmeta} <>
                       md_parse_inlines(f, refs, rest, endpos)),
                 z => Ast.IText{"[", md_span_text(pos, "[")} <>
                   md_parse_inlines(f, refs, t, md_pos_add_text(pos, "[")))
@@ -2008,7 +2231,7 @@ def md_parse_inlines(fuel: Nat, +refs: List<&2, RefDef>, +s: String, +pos: U32) 
             +closehit =>
               +label = str_split_before(closehit)
               +afterclose = str_split_after(closehit)
-              +inlinechoice0 = md_scan_inline_link_choice(label, afterclose)
+              +inlinechoice0 = md_scan_inline_link_choice(label, afterclose, md_pos_add(pos, 1n))
               +choice = maybe_case(LinkChoice, Maybe<&2, LinkChoice>, inlinechoice0,
                 +inlinehit => Some{inlinehit},
                 u => md_scan_ref_label_use(refs, label, afterclose))
@@ -2016,6 +2239,9 @@ def md_parse_inlines(fuel: Nat, +refs: List<&2, RefDef>, +s: String, +pos: U32) 
                 +goodchoice =>
                   +rest = link_choice_after(goodchoice)
                   +goodtarget = link_choice_target(goodchoice)
+                  +destmeta = md_link_destination(link_target_raw_href(goodtarget),
+                    link_target_logical_href(goodtarget), link_choice_destination_span(goodchoice),
+                    link_choice_reference_definition_span(goodchoice))
                   +label_start = md_pos_add(pos, 2n)
                   +used = Nat.sub(Text.utf8_length(s), Text.utf8_length(rest))
                   +endpos = md_pos_add(pos, used)
@@ -2023,7 +2249,7 @@ def md_parse_inlines(fuel: Nat, +refs: List<&2, RefDef>, +s: String, +pos: U32) 
                   +children = md_emph_resolve_link_label_input(label, label_start, children0)
                   +alttext = md_alt_inlines(children)
                   Ast.IImage{link_target_href(goodtarget), alttext,
-                    link_target_title(goodtarget), Ast.Span{pos, endpos}} <>
+                    link_target_title(goodtarget), Ast.Span{pos, endpos}, destmeta} <>
                     md_parse_inlines(f, refs, rest, endpos),
                 z => Ast.IText{"!", md_span_text(pos, "!")} <>
                   md_parse_inlines(f, refs, SCon{'[', tt}, md_pos_add_text(pos, "!")))
@@ -2049,9 +2275,12 @@ def md_parse_inlines(fuel: Nat, +refs: List<&2, RefDef>, +s: String, +pos: U32) 
                   +ok = Bool.and(is_uri || is_email, Bool.not(String.contains(label, "<")))
                   +used = Nat.add(Text.utf8_length(label), 2n)
                   +endpos = md_pos_add(pos, used)
+                  +labelstart = md_pos_add(pos, 1n)
+                  +autospan = md_inline_dest_span_finish(labelstart, label)
+                  +destmeta = md_link_destination(label, label, autospan, None{})
                   ifs(List<&2, Ast.Inline>, ok,
                     v => Ast.IAutolink{md_autolink_href(label, is_email), label,
-                      Ast.Span{pos, endpos}} <> md_parse_inlines(f, refs, rest, endpos),
+                      Ast.Span{pos, endpos}, destmeta} <> md_parse_inlines(f, refs, rest, endpos),
                     v => Ast.IText{"<", md_span_text(pos, "<")} <>
                       md_parse_inlines(f, refs, t, md_pos_add_text(pos, "<")))
                 u => Ast.IText{"<", md_span_text(pos, "<")} <>
@@ -2066,7 +2295,7 @@ def md_parse_inlines(fuel: Nat, +refs: List<&2, RefDef>, +s: String, +pos: U32) 
                 md_parse_inlines(f, refs, String.drop(s, run), endpos)
             u =>
               +n = md_plain_index(s, 0n)
-              +plain0 = String.take(s, n)
+              +plain0 = md_take(s, n)
               +rest = String.drop(s, n)
               ifs(List<&2, Ast.Inline>, String.starts_with(rest, "\n"),
                 v =>
@@ -2112,6 +2341,9 @@ def md_parse_inlines_top(+refs: List<&2, RefDef>, +s: String, +pos: U32) -> List
 
 type MdLine is Data:
   MdLine{text: String, start: U32, end: U32, col: Nat, lazy: Bool}
+
+def md_line_mk(+text: String, +start: U32, +end: U32, +col: Nat, +lazy: Bool) -> MdLine:
+  MdLine{text, start, end, col, lazy}
 
 def md_line_text(x: MdLine) -> String:
   match x:
@@ -2219,28 +2451,47 @@ def md_strip_columns_from(+s: String, +n: Nat, +startcol: Nat) -> MdColumnStrip:
 # lines; real trailing blank lines remain because they appear as earlier empty
 # cells.  Besides being cleaner for ordinary blocks, this keeps an unclosed
 # fenced block from gaining a phantom extra LF at EOF.
-def md_drop_final_empty(+xs: List<&2, String>) -> List<&2, String>:
+def md_lines_go(s: String, +cur: String, +lines: List<&2, String>) -> List<&2, String>:
+  match s:
+    case SNil{}:
+      List.reverse(&2, String, String.reverse(cur) <> lines)
+    case SCon{'\n', t}:
+      md_lines_go(t, SNil{}, String.reverse(cur) <> lines)
+    case SCon{+h, +t}:
+      md_lines_go(t, SCon{h, cur}, lines)
+
+# Same cell semantics as String.lines, including the artificial empty cell
+# after a final newline, but iterative in the generated backends.
+def md_lines(+s: String) -> List<&2, String>:
+  md_lines_go(s, SNil{}, Nil{})
+
+def md_drop_final_empty_rev(xs: List<&2, String>) -> List<&2, String>:
   match xs:
     case Nil{}:
       Nil{}
-    case h <> Nil{}:
+    case +h <> +t:
       ifs(List<&2, String>, String.is_empty(h),
-        u => Nil{},
-        u => [h])
-    case h <> (x <> rest):
-      h <> md_drop_final_empty(x <> rest)
+        u => List.reverse(&2, String, t),
+        u => List.reverse(&2, String, h <> t))
+
+def md_drop_final_empty(+xs: List<&2, String>) -> List<&2, String>:
+  md_drop_final_empty_rev(List.reverse(&2, String, xs))
 
 # Annotate each line with an approximate UTF-8 byte interval in the
 # normalized source.
-def md_make_lines(+xs: List<&2, String>, +start: Nat) -> List<&2, MdLine>:
+def md_make_lines_go(xs: List<&2, String>, +start: Nat, +acc: List<&2, MdLine>) -> List<&2, MdLine>:
   match xs:
     case Nil{}:
-      Nil{}
-    case h <> t:
+      List.reverse(&2, MdLine, acc)
+    case +h <> t:
       +len = Text.utf8_length(h)
       +spos = U32.from_nat(start)
       +epos = U32.from_nat(Nat.add(start, len))
-      MdLine{h, spos, epos, 0n, False{}} <> md_make_lines(t, Nat.add(Nat.add(start, len), 1n))
+      +line = md_line_mk(h, spos, epos, 0n, False{})
+      md_make_lines_go(t, Nat.add(Nat.add(start, len), 1n), line <> acc)
+
+def md_make_lines(+xs: List<&2, String>, +start: Nat) -> List<&2, MdLine>:
+  md_make_lines_go(xs, start, Nil{})
 
 type StringLinesGrab is Data:
   StringLinesGrab{lines: List<&2, String>, rest: List<&2, MdLine>, end: U32}
@@ -2652,11 +2903,33 @@ def md_scan_indented(+xs: List<&2, MdLine>) -> StringLinesGrab:
 # HTML blocks.  Kind numbers follow the seven start conditions in the
 # CommonMark spec.  Type 6/7 blocks end immediately before a blank line;
 # types 1--5 end on the line containing their matching terminator.
+def md_starts_ci_go(s: String, p: String) -> Bool:
+  match s:
+    case SNil{}:
+      String.is_empty(p)
+    case SCon{+h, +t}:
+      match p:
+        case SNil{}:
+          True{}
+        case SCon{+ph, +pt}:
+          ifs(Bool, Char.is_eq(Char.to_lower(h), ph),
+            u => md_starts_ci_go(t, pt),
+            u => False{})
+
 def md_starts_ci(+s: String, +prefix: String) -> Bool:
-  String.starts_with(String.to_lower(s), prefix)
+  md_starts_ci_go(s, prefix)
+
+def md_contains_ci_go(s: String, +needle: String) -> Bool:
+  match s:
+    case SNil{}:
+      String.is_empty(needle)
+    case SCon{+h, +t}:
+      ifs(Bool, md_starts_ci(SCon{h, t}, needle),
+        u => True{},
+        u => md_contains_ci_go(t, needle))
 
 def md_contains_ci(+s: String, +needle: String) -> Bool:
-  String.contains(String.to_lower(s), needle)
+  md_contains_ci_go(s, needle)
 
 def md_html_type1_with(+s: String, +prefix: String) -> Bool:
   +len = String.length(prefix)
@@ -3634,8 +3907,30 @@ def md_scan_raw_line(+s: String) -> WordSplit:
 def md_drop_line_ending(+s: String) -> String:
   +len = String.length(s)
   ifs(String, String.ends_with(s, "\n"),
-    u => String.take(s, Nat.sub(len, 1n)),
+    u => md_take(s, Nat.sub(len, 1n)),
     u => s)
+
+
+# Blank a byte-length prefix while preserving both UTF-8 byte length and line
+# structure.  Non-newline Unicode scalar values become one ASCII space per
+# UTF-8 byte, so downstream byte positions are unchanged even though the
+# blanked text is inert whitespace.
+def md_blank_prefix_go(s: String, +n: Nat, +acc: String) -> String:
+  match s:
+    case SNil{}:
+      String.reverse(acc)
+    case SCon{+h, +t}:
+      ifs(String, Nat.is_eq(n, 0n),
+        u => String.reverse(acc),
+        u =>
+          +width = Text.utf8_width(h)
+          +piece = ifs(String, Char.is_eq(h, '\n'),
+            v => "\n",
+            v => md_repeat_char(' ', width))
+          md_blank_prefix_go(t, Nat.sub(n, width), piece ++ acc))
+
+def md_blank_prefix_bytes(+s: String, +n: Nat) -> String:
+  md_blank_prefix_go(s, n, SNil{})
 
 def md_strip_finish(+chunks: List<&2, String>, +refs: List<&2, RefDef>) -> RefStrip:
   RefStrip{String.concat(List.reverse(&2, String, chunks)), refs}
@@ -3674,7 +3969,8 @@ def md_strip_refs_go(
   +s: String,
   +chunks: List<&2, String>,
   +refs: List<&2, RefDef>,
-  +state: StripState
+  +state: StripState,
+  +pos: U32
 ) -> RefStrip:
   match fuel:
     case 0n:
@@ -3690,27 +3986,42 @@ def md_strip_refs_go(
           +inpara = strip_state_inpara(state)
           +fencemode = strip_state_fencemode(state)
           +indent = md_marker_indent(line)
-          +candstart = Nat.is_le(indent, 3n) && String.starts_with(String.drop(line, indent), "[")
+          +indentchars = md_marker_indent_chars_at(line, 0n)
+          +candstart = Nat.is_le(indent, 3n) && String.starts_with(String.drop(line, indentchars), "[")
           +cand = Bool.and(candstart, Bool.and(Bool.not(inpara), Nat.is_eq(fencemode, 0n)))
-          +defsrc = String.drop(s, indent)
+          +defsrc = String.drop(s, indentchars)
+          +defbase = md_pos_add(pos, indentchars)
           +defhit = ifs(Maybe<&2, RefHit>, cand,
-            v => md_scan_reference_definition(defsrc),
+            v => md_scan_reference_definition_at(defsrc, defbase),
             v => None{})
           maybe_case(RefHit, RefStrip, defhit,
             +hit =>
               +defrest = ref_hit_rest(hit)
-              +nextinput = ifs(String, String.starts_with(defrest, "\n"),
+              +defconsumed = ref_hit_consumed(hit)
+              +hasnewline = String.starts_with(defrest, "\n")
+              +nextinput = ifs(String, hasnewline,
                 v => String.drop(defrest, 1n),
                 v => defrest)
+              +afterdef = md_pos_add(defbase, defconsumed)
+              +nextpos = ifs(U32, hasnewline,
+                v => md_pos_add(afterdef, 1n),
+                v => afterdef)
+              +blankbody = md_blank_prefix_bytes(defsrc, defconsumed)
+              +blankline = ifs(String, hasnewline,
+                v => blankbody ++ "\n",
+                v => blankbody)
+              +blanked = md_repeat_char(' ', indentchars) ++ blankline
               +newrefs = md_add_ref_once(refs, ref_hit_def(hit))
-              md_strip_refs_go(f, nextinput, chunks, newrefs, StripState{False{}, fencemode, strip_state_fencelen(state)}),
+              md_strip_refs_go(f, nextinput, blanked <> chunks, newrefs,
+                StripState{False{}, fencemode, strip_state_fencelen(state)}, nextpos),
             v =>
               +newstate = md_strip_next_state(line, state)
-              md_strip_refs_go(f, afterline, linefull <> chunks, refs, newstate)))
+              +linepos = md_pos_add_text(pos, linefull)
+              md_strip_refs_go(f, afterline, linefull <> chunks, refs, newstate, linepos)))
 
 def md_strip_reference_definitions(+source: String) -> RefStrip:
   +len = Text.utf8_length(source)
-  md_strip_refs_go(Nat.add(len, 4n), source, Nil{}, Nil{}, StripState{False{}, 0n, 0n})
+  md_strip_refs_go(Nat.add(len, 4n), source, Nil{}, Nil{}, StripState{False{}, 0n, 0n}, 0)
 
 # Build the line table and parse the normalized input.  Fuel is proportional
 # to input bytes; blank-only lines still consume one fuel and there is slack
@@ -3719,7 +4030,7 @@ def md_document_from_normalized(+source: String) -> Ast.Document:
   +stripped = md_strip_reference_definitions(source)
   +refs = ref_strip_refs(stripped)
   +cleansource = ref_strip_text(stripped)
-  +rawlines = String.lines(cleansource)
+  +rawlines = md_lines(cleansource)
   +lines = md_make_lines(md_drop_final_empty(rawlines), 0n)
   +len = Text.utf8_length(source)
   +fuel = Nat.add(Nat.mul(8n, len), 16n)

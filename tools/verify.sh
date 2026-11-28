@@ -25,6 +25,11 @@ run_bend test/textile_smoke.bend
 run_bend test/render_smoke.bend
 run_bend test/render_link_rewrite_smoke.bend
 run_bend test/document_links_smoke.bend
+run_bend test/document_link_provenance_smoke.bend
+run_bend test/source_map_smoke.bend
+
+echo "== javascript backend stack regression"
+sh tools/verify_js_stack.sh | tail -n 1
 run_bend test/cooklang_smoke.bend
 run_bend test/cooklang_roundtrip_smoke.bend
 run_bend test/scale_smoke.bend

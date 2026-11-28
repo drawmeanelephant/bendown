@@ -204,15 +204,15 @@ def render_inlines_with_link_rewrite(~C: Data, ~rewrite: C -> String -> String,
           "<span" ++ render_attrs(attrs) ++ ">" ++ render_inlines_with_link_rewrite(~C, ~rewrite,
             children, profile, ctx) ++ "</span>" ++
             render_inlines_with_link_rewrite(~C, ~rewrite, t, profile, ctx)
-        case Ast.ILink{children, href, title, span}:
+        case Ast.ILink{children, href, title, span, destination}:
           "<a href=\"" ++ escape_html(rewrite(ctx, href)) ++ "\"" ++ render_title_attr(title) ++ ">" ++
             render_inlines_with_link_rewrite(~C, ~rewrite, children, profile, ctx) ++ "</a>" ++
             render_inlines_with_link_rewrite(~C, ~rewrite, t, profile, ctx)
-        case Ast.IImage{src, alt, title, span}:
+        case Ast.IImage{src, alt, title, span, destination}:
           "<img src=\"" ++ escape_html(rewrite(ctx, src)) ++ "\" alt=\"" ++ escape_html(alt) ++ "\"" ++
             render_title_attr(title) ++ void_close(profile) ++
             render_inlines_with_link_rewrite(~C, ~rewrite, t, profile, ctx)
-        case Ast.IAutolink{href, label, span}:
+        case Ast.IAutolink{href, label, span, destination}:
           "<a href=\"" ++ escape_html(rewrite(ctx, href)) ++ "\">" ++ escape_html(label) ++ "</a>" ++
             render_inlines_with_link_rewrite(~C, ~rewrite, t, profile, ctx)
         case Ast.IRawHtml{text, span}:

@@ -59,13 +59,13 @@ def no_string() -> Maybe<&2, String>:
 
 def inline_link(children: List<&2, Ast.Inline>, +target: String,
   title: Maybe<&2, String>, span: Ast.Span) -> Ast.Inline:
-  Ast.ILink{children, target, title, span}
+  Ast.ILink{children, target, title, span, None{}}
 
 def autolink_inline(+href: String, +label: String, span: Ast.Span) -> Ast.Inline:
-  Ast.IAutolink{href, label, span}
+  Ast.IAutolink{href, label, span, None{}}
 
 def image_inline(+src: String, +alt: String, title: Maybe<&2, String>, span: Ast.Span) -> Ast.Inline:
-  Ast.IImage{src, alt, title, span}
+  Ast.IImage{src, alt, title, span, None{}}
 
 def emph_inline(children: List<&2, Ast.Inline>, span: Ast.Span) -> Ast.Inline:
   Ast.IEmph{children, span}

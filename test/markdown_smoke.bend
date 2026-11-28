@@ -47,13 +47,13 @@ def show_inlines(xs: List<&2, Ast.Inline>) -> String:
       "E[" ++ show_inlines(children) ++ "]" ++ show_span(span) ++ ";" ++ show_inlines(rest)
     case Ast.IStrong{children, span} <> rest:
       "S[" ++ show_inlines(children) ++ "]" ++ show_span(span) ++ ";" ++ show_inlines(rest)
-    case Ast.ILink{children, href, title, span} <> rest:
+    case Ast.ILink{children, href, title, span, destination} <> rest:
       "L[" ++ show_inlines(children) ++ "](" ++ q(href) ++ "," ++
         show_maybe_string(title) ++ ")" ++ show_span(span) ++ ";" ++ show_inlines(rest)
-    case Ast.IImage{src, alt, title, span} <> rest:
+    case Ast.IImage{src, alt, title, span, destination} <> rest:
       "Img(" ++ q(src) ++ "," ++ q(alt) ++ "," ++ show_maybe_string(title) ++ ")" ++
         show_span(span) ++ ";" ++ show_inlines(rest)
-    case Ast.IAutolink{href, label, span} <> rest:
+    case Ast.IAutolink{href, label, span, destination} <> rest:
       "A(" ++ q(href) ++ "," ++ q(label) ++ ")" ++ show_span(span) ++ ";" ++ show_inlines(rest)
     case Ast.ISoftBreak{span} <> rest:
       "Soft" ++ show_span(span) ++ ";" ++ show_inlines(rest)

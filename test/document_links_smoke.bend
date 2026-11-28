@@ -72,10 +72,10 @@ def no_alignments() -> List<&2, Ast.Alignment>:
   {[] : List<&2, Ast.Alignment>}
 
 def inline_link(children: List<&2, Ast.Inline>, +target: String, span: Ast.Span) -> Ast.Inline:
-  Ast.ILink{children, target, None{}, span}
+  Ast.ILink{children, target, None{}, span, None{}}
 
 def image_inline(+target: String, +alt: String, span: Ast.Span) -> Ast.Inline:
-  Ast.IImage{target, alt, None{}, span}
+  Ast.IImage{target, alt, None{}, span, None{}}
 
 def heading_block(children: List<&2, Ast.Inline>, span: Ast.Span) -> Ast.Block:
   Ast.BHeading{1, children, no_attrs(), span}
