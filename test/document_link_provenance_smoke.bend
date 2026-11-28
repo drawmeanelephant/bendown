@@ -175,4 +175,10 @@ def main() -> IO(Unit):
     Unit <- expect_equal("blockquote-next-line-destination-provenance",
       "\"/u\"|raw=Some(\"/u\")|logical=Some(\"/u\")|use=0-8|dest=Some(19-21)|def=Some(12-21)",
       show_first("[use][x]\n\n> [x]:\n> /u\n"))
+    Unit <- expect_equal("blockquote-partial-tab-reference-provenance",
+      "\"/u\"|raw=Some(\"/u\")|logical=Some(\"/u\")|use=11-19|dest=Some(7-9)|def=Some(2-9)",
+      show_first(">\t[x]: /u\n\n[use][x]"))
+    Unit <- expect_equal("blockquote-partial-tab-multiline-reference-provenance",
+      "\"/u\"|raw=Some(\"/u\")|logical=Some(\"/u\")|use=23-31|dest=Some(7-9)|def=Some(2-21)",
+      show_first("> [x]: /u \"one\n>\ttwo\"\n\n[use][x]"))
     IO.print("document link provenance smoke: all checks passed")

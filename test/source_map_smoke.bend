@@ -67,4 +67,7 @@ def main() -> IO(Unit):
     Unit <- expect_equal("crlf-blockquote-reference-document-link-original-spans",
       "0-8|dest=Some(19-21)|def=Some(14-21)",
       show_mapped_first_input("[use][x]\r\n\r\n> [x]: /u\r\n"))
+    Unit <- expect_equal("crlf-blockquote-partial-tab-reference-original-spans",
+      "13-21|dest=Some(7-9)|def=Some(2-9)",
+      show_mapped_first_input(">\t[x]: /u\r\n\r\n[use][x]\r\n"))
     IO.print("source map smoke: all checks passed")

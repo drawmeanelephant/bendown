@@ -76,4 +76,43 @@ def main() -> IO(Unit):
     Unit <- expect_equal("partial-tab-after-definition-is-only-remainder",
       "<blockquote>\n<p>remainder</p>\n</blockquote>\n<p><a href=\"/u\">x</a></p>\n",
       render_md("> [x]: /u\n>\tremainder\n\n[x]\n"))
+    Unit <- expect_equal("blockquote-reference-lazy-remains-inside",
+      "<blockquote>\n<p>lazy</p>\n</blockquote>\n<p><a href=\"/u\">x</a></p>\n",
+      render_md("> [x]: /u\nlazy\n\n[x]\n"))
+    Unit <- expect_equal("nested-list-reference-keeps-structure",
+      "<ul>\n<li>a\n<ul>\n<li></li>\n</ul>\n</li>\n</ul>\n<p><a href=\"/u\">x</a></p>\n",
+      render_md("- a\n  - [x]: /u\n\n[x]\n"))
+    Unit <- expect_equal("partial-tab-reference-in-quote",
+      "<blockquote>\n</blockquote>\n<p><a href=\"/u\">x</a></p>\n",
+      render_md(">\t[x]: /u\n\n[x]\n"))
+    Unit <- expect_equal("partial-tab-multiline-title-in-quote",
+      "<blockquote>\n</blockquote>\n<p><a href=\"/u\" title=\"one\ntwo\">x</a></p>\n",
+      render_md("> [x]: /u \"one\n>\ttwo\"\n\n[x]\n"))
+    Unit <- expect_equal("unicode-casefold-latin-umlaut",
+      "<p><a href=\"/u\">ä</a></p>\n",
+      render_md("[Ä]: /u\n\n[ä]\n"))
+    Unit <- expect_equal("unicode-casefold-latin-e-acute",
+      "<p><a href=\"/u\">é</a></p>\n",
+      render_md("[É]: /u\n\n[é]\n"))
+    Unit <- expect_equal("unicode-casefold-latin-ae",
+      "<p><a href=\"/u\">æ</a></p>\n",
+      render_md("[Æ]: /u\n\n[æ]\n"))
+    Unit <- expect_equal("unicode-casefold-latin-oe",
+      "<p><a href=\"/u\">œ</a></p>\n",
+      render_md("[Œ]: /u\n\n[œ]\n"))
+    Unit <- expect_equal("unicode-casefold-turkish-dotted-i",
+      "<p><a href=\"/u\">i̇</a></p>\n",
+      render_md("[İ]: /u\n\n[i̇]\n"))
+    Unit <- expect_equal("unicode-casefold-greek-alpha-ypogegrammeni",
+      "<p><a href=\"/u\">ᾳ</a></p>\n",
+      render_md("[ᾼ]: /u\n\n[ᾳ]\n"))
+    Unit <- expect_equal("unicode-casefold-armenian",
+      "<p><a href=\"/u\">ա</a></p>\n",
+      render_md("[Ա]: /u\n\n[ա]\n"))
+    Unit <- expect_equal("unicode-casefold-capital-sharp-s-expansion",
+      "<p><a href=\"/u\">ss</a></p>\n",
+      render_md("[ẞ]: /u\n\n[ss]\n"))
+    Unit <- expect_equal("unicode-casefold-ligature-expansion",
+      "<p><a href=\"/u\">ff</a></p>\n",
+      render_md("[ﬀ]: /u\n\n[ff]\n"))
     IO.print("container reference smoke: all checks passed")
