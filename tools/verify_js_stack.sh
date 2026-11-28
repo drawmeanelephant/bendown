@@ -100,8 +100,8 @@ for (const [name, input, expected] of [
   } catch (error) {
     throw new Error(`${name}: ${error && error.message}`);
   }
-  if (value.links !== expected || value.targets !== expected) {
-    throw new Error(`${name}: expected ${expected} links/targets, got ${value.links}/${value.targets}`);
+  if (value.links !== expected || value.targets !== expected || value.mapped !== expected) {
+    throw new Error(`${name}: expected ${expected} links/targets/mapped, got ${value.links}/${value.targets}/${value.mapped}`);
   }
   count += 1;
 }

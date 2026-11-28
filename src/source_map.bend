@@ -128,11 +128,16 @@ def source_map_original_document_link(+map: SourceMap,
       DocumentLinks.DocumentLink{target, source_map_original_span(map, span), kind,
         source_map_original_link_destination_maybe(map, destination)}
 
-def source_map_original_document_links(+map: SourceMap,
-  xs: List<&2, DocumentLinks.DocumentLink>) -> List<&2, DocumentLinks.DocumentLink>:
+def source_map_original_document_links_go(+map: SourceMap,
+  xs: List<&2, DocumentLinks.DocumentLink>,
+  +acc: List<&2, DocumentLinks.DocumentLink>) -> List<&2, DocumentLinks.DocumentLink>:
   match xs:
     case Nil{}:
-      Nil{}
+      List.reverse(&2, DocumentLinks.DocumentLink, acc)
     case h <> t:
-      source_map_original_document_link(map, h) <>
-        source_map_original_document_links(map, t)
+      source_map_original_document_links_go(map, t,
+        source_map_original_document_link(map, h) <> acc)
+
+def source_map_original_document_links(+map: SourceMap,
+  xs: List<&2, DocumentLinks.DocumentLink>) -> List<&2, DocumentLinks.DocumentLink>:
+  source_map_original_document_links_go(map, xs, Nil{})

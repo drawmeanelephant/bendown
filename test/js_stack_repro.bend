@@ -2,6 +2,7 @@ import Base
 import ../src/parser/markdown.bend as Markdown
 import ../src/ast.bend as Ast
 import ../src/document_links.bend as DocumentLinks
+import ../src/source_map.bend as SourceMap
 
 def count_blocks_go(xs: List<&2, Ast.Block>, acc: Nat) -> Nat:
   match xs:
@@ -32,7 +33,7 @@ def count_document_links(+source: String) -> Nat:
   count_document_links_go(DocumentLinks.document_links(Markdown.parse_markdown(source)), 0n)
 
 type DocumentLinksStackProbe is Data:
-  DocumentLinksStackProbe{links: Nat, targets: Nat}
+  DocumentLinksStackProbe{links: Nat, targets: Nat, mapped: Nat}
 
 def count_strings_go(xs: List<&2, String>, acc: Nat) -> Nat:
   match xs:
@@ -43,6 +44,9 @@ def count_strings_go(xs: List<&2, String>, acc: Nat) -> Nat:
 
 def document_links_stack_probe(+source: String) -> DocumentLinksStackProbe:
   +doc = Markdown.parse_markdown(source)
+  +links = DocumentLinks.document_links(doc)
+  +map = SourceMap.source_map_from_original(source)
   DocumentLinksStackProbe{
-    count_document_links_go(DocumentLinks.document_links(doc), 0n),
-    count_strings_go(DocumentLinks.document_link_targets(doc), 0n)}
+    count_document_links_go(links, 0n),
+    count_strings_go(DocumentLinks.document_link_targets(doc), 0n),
+    count_document_links_go(SourceMap.source_map_original_document_links(map, links), 0n)}
